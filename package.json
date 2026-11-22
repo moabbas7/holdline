@@ -1,0 +1,39 @@
+{
+  "name": "holdline",
+  "version": "0.1.0",
+  "description": "Local CLI that catches what AI coding agents break outside the task they were given.",
+  "type": "module",
+  "bin": {
+    "holdline": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.17"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "snapshot",
+    "rollback",
+    "git",
+    "cli"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@inquirer/prompts": "^8.8.1",
+    "commander": "^14.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.1"
+  }
+}
