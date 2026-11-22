@@ -1,0 +1,8 @@
+{
+  // comments and trailing commas are allowed here
+  "compilerOptions": {
+    "strict": true,
+    "jsx": "preserve",
+    "paths": { "@/*": ["./*"] },
+  },
+}

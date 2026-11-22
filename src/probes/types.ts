@@ -21,6 +21,8 @@ export interface Finding {
   title: string;
   detail?: string;
   path?: string;
+  /** Extra lines printed indented under the finding (e.g. what depends on a changed file). */
+  lines?: string[];
 }
 
 export interface ProbeReport {

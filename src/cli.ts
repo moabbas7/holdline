@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { Command, InvalidArgumentError } from 'commander';
 import { afterCommand } from './commands/after.js';
 import { beforeCommand } from './commands/before.js';
+import { graphCommand } from './commands/graph.js';
 import { initCommand } from './commands/init.js';
 import { pruneCommand } from './commands/prune.js';
 import { rollbackCommand } from './commands/rollback.js';
@@ -75,6 +76,17 @@ program
       const report = await afterCommand(process.cwd(), o, createCliIo({ json: o.json }));
       if (o.json) process.stdout.write(JSON.stringify(report, null, 2) + '\n');
       return report.regressed ? 1 : 0;
+    }),
+  );
+
+program
+  .command('graph <target>')
+  .description('show what a file depends on and what depends on it (also route:/api/x or table:name)')
+  .option('--json', 'print the result as JSON on stdout')
+  .action((target: string, o: { json?: boolean }) =>
+    run(async () => {
+      const result = await graphCommand(process.cwd(), target, o, createCliIo({ json: o.json }));
+      if (o.json) process.stdout.write(JSON.stringify(result, null, 2) + '\n');
     }),
   );
 

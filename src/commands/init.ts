@@ -16,6 +16,8 @@ function showConfig(config: Config, io: Io): void {
     const c = config.checks[name];
     io.log(`  ${(name + ':').padEnd(17)} ${c ? io.c.cyan(c.command) : io.c.dim('(disabled)')}`);
   }
+  const deps = config.probes?.dependencies?.enabled !== false;
+  io.log(`  Dependency map:   ${deps ? io.c.bold('enabled') : io.c.dim('(disabled)')}`);
 }
 
 export async function initCommand(cwd: string, opts: InitOptions, io: Io): Promise<Config> {

@@ -114,6 +114,7 @@ export function printReport(r: AfterReport, io: Io): void {
         f.kind === 'regression' ? io.c.red : f.kind === 'fixed' ? io.c.green : f.kind === 'change' ? (s: string) => s : io.c.dim;
       io.log(`  ${paint(f.kind === 'change' ? f.title : `${MARK[f.kind]} ${f.title}`)}`);
       if (f.kind === 'regression' && f.detail) io.log(io.c.dim(indent(f.detail, 15)));
+      for (const line of f.lines ?? []) io.log(io.c.dim(`      ${line}`));
     }
   }
   io.log();
