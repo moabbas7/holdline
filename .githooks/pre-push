@@ -1,0 +1,12 @@
+#!/bin/sh
+# Block the push if any AI attribution slipped through
+z=0000000000000000000000000000000000000000
+while read local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$z" ] && continue
+  if [ "$remote_sha" = "$z" ]; then range="$local_sha"; else range="$remote_sha..$local_sha"; fi
+  if git log --format=%B "$range" | grep -Eiq 'co-authored-by:.*(claude|anthropic)|claude-session:|generated with \[?claude code'; then
+    echo "Push blocked: AI attribution found in a commit message. Amend it first."
+    exit 1
+  fi
+done
+exit 0
