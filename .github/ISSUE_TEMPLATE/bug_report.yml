@@ -1,0 +1,58 @@
+name: Bug report
+description: Something holdline did wrong, or a crash
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please remove secrets (connection strings, tokens, private code) from anything you paste.
+        Security issues: please report them privately instead (see SECURITY.md).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, what holdline did, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: The commands, and a minimal project or the relevant files if you can share them.
+      placeholder: |
+        1. npx holdline before --task "..."
+        2. (the change the agent made)
+        3. npx holdline after
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: The terminal output, or the relevant part of `holdline after --json`.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: holdline version
+      description: Output of `npx holdline --version`
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: OS and Node version
+      placeholder: macOS 15, Node 22.13
+    validations:
+      required: true
+  - type: input
+    id: project
+    attributes:
+      label: Project type
+      placeholder: Next.js 15 + Supabase, pnpm monorepo
+  - type: textarea
+    id: doctor
+    attributes:
+      label: holdline doctor
+      description: Output of `npx holdline doctor`, if it's relevant.
+      render: text

@@ -2,6 +2,14 @@
   "name": "holdline",
   "version": "0.1.0",
   "description": "Local CLI that catches what AI coding agents break outside the task they were given.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/moabbas7/holdline.git"
+  },
+  "homepage": "https://github.com/moabbas7/holdline#readme",
+  "bugs": {
+    "url": "https://github.com/moabbas7/holdline/issues"
+  },
   "type": "module",
   "bin": {
     "holdline": "dist/cli.js"
@@ -10,7 +18,8 @@
     "dist",
     "!dist/**/*.map",
     "schema",
-    "docs"
+    "docs",
+    "!docs/media"
   ],
   "engines": {
     "node": ">=22.13"
@@ -28,7 +37,15 @@
     "snapshot",
     "rollback",
     "git",
-    "cli"
+    "cli",
+    "ai-agents",
+    "coding-agent",
+    "claude-code",
+    "cursor",
+    "codex",
+    "regression",
+    "testing",
+    "devtools"
   ],
   "license": "MIT",
   "dependencies": {

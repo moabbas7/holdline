@@ -50,7 +50,7 @@ The machine-readable JSON Schema is [`schema/after-report.v2.json`](../schema/af
 | `probe` | string | `checks`, `files`, `dependencies`, `database`, `api`, `visual` (or a custom probe id). |
 | `kind` | `regression` \| `change` \| `fixed` \| `still-failing` \| `info` | A regression made the exit code 1. |
 | `severity` | `critical` \| `high` \| `medium` \| `low` \| `info` | `critical`: a check that went from passing to failing, or a broken import. `high`: a database or API break. `medium`: a visual problem. `low`: any change. `info`: fixed, already failing and notes. |
-| `scope` | `outside-scope` \| `broken-by-task` \| `expected-ripple` \| `in-scope` | `broken-by-task`: a regression in a direct dependent of a file, route or table the agent changed for the task. `expected-ripple`: such a dependent changed but didn't break. See "How scope is decided" in the README. |
+| `scope` | `outside-scope` \| `broken-by-task` \| `expected-ripple` \| `in-scope` | `broken-by-task`: a regression in a direct dependent of a file, route or table the agent changed for the task. `expected-ripple`: such a dependent changed but didn't break. See [task-scope.md](task-scope.md#how-scope-is-decided). |
 | `reason` | string | One line explaining the scope, e.g. `app/billing/page.tsx was edited by the agent, but the task doesn't name it …`. |
 | `title` | string | What happened. |
 | `detail` | string? | Check output (the command, the end of its output and the log path). |

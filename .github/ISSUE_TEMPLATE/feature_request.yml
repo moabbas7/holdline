@@ -1,0 +1,23 @@
+name: Feature request
+description: Something holdline should catch or do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What did an agent break that holdline missed, or what is hard to do today?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you'd like
+      description: How holdline could catch it or help. A sketch of the output is welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Project and agent
+      description: Framework, database, and the agent you use, if relevant.
