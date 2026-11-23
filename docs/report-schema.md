@@ -1,8 +1,10 @@
-# `holdline after --json`: report schema, version 1
+# `holdline after --json`: report schema, version 2
 
 `holdline after --json` prints one JSON document on stdout. Everything else (progress, the human report) goes to stderr. The same document is saved to `.holdline/last-report.json`, `.holdline/runs/<timestamp>-after/report.json` and `.holdline/reports/<timestamp>.json` (next to the HTML report).
 
-The machine-readable JSON Schema is [`schema/after-report.v1.json`](../schema/after-report.v1.json) (draft 2020-12).
+The machine-readable JSON Schema is [`schema/after-report.v2.json`](../schema/after-report.v2.json) (draft 2020-12). The previous version stays in [`schema/after-report.v1.json`](../schema/after-report.v1.json).
+
+**Changes from version 1.** Regressions in direct dependents of the task's changes (the callers of a helper whose option the task renamed, a route that reads a column a task migration dropped) used to be filed under `expected-ripple`. They now have their own scope, `broken-by-task`, and their own count. `expected-ripple` only holds changes that didn't break anything. `findings` are ranked outside scope, broken by the task, expected ripple, in scope.
 
 **Versioning.** `schema` is always `"holdline.after-report"`. `schemaVersion` is bumped only for breaking changes: a field removed, renamed or changed in meaning or type. New optional fields may appear within a version, so ignore fields you don't know.
 
@@ -11,7 +13,7 @@ The machine-readable JSON Schema is [`schema/after-report.v1.json`](../schema/af
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `schema` | `"holdline.after-report"` | Identifies the document. |
-| `schemaVersion` | `1` | Version of this format. |
+| `schemaVersion` | `2` | Version of this format. |
 | `task` | string | The task given to `holdline before --task`. |
 | `createdAt` | ISO time | When `after` ran. |
 | `sessionCreatedAt` | ISO time | When `before` ran. |
@@ -20,11 +22,11 @@ The machine-readable JSON Schema is [`schema/after-report.v1.json`](../schema/af
 | `scope` | object | The task's scope (see below). |
 | `regressed` | boolean | Some finding is a regression, in any scope. |
 | `exitCode` | `0` or `1` | The process exit code: `1` when `regressed`. |
-| `counts` | object | Findings per scope (`outside-scope`, `expected-ripple`, `in-scope`), `regressions`, and `footer` (fixed, already failing, notes). |
+| `counts` | object | Findings per scope (`outside-scope`, `broken-by-task`, `expected-ripple`, `in-scope`), `regressions`, and `footer` (fixed, already failing, notes). |
 | `summary` | string[1–3] | The plain-English summary. |
 | `rollbackCommand` | `"holdline rollback"` | The exact command that undoes every change since `before`. |
 | `htmlReport` | string or null | Path of the HTML report, relative to the project root. |
-| `findings` | Finding[] | Ranked: outside scope, then expected ripple, then in scope (each by severity), then footer items. |
+| `findings` | Finding[] | Ranked: outside scope, then broken by the task, then expected ripple, then in scope (each by severity), then footer items. |
 | `probes` | `{ id, title, status, summary }[]` | One line per probe; `status` is `ok`, `changed`, `regressed` or `skipped`. |
 | `ownOutputs` | object | Files written by holdline's own checks in `before`. `excluded` were not counted as agent changes. `agentEdited` were also changed by the agent and were counted. `gitignoreSuggestion` lists the lines to add to `.gitignore`. |
 
@@ -48,7 +50,7 @@ The machine-readable JSON Schema is [`schema/after-report.v1.json`](../schema/af
 | `probe` | string | `checks`, `files`, `dependencies`, `database`, `api`, `visual` (or a custom probe id). |
 | `kind` | `regression` \| `change` \| `fixed` \| `still-failing` \| `info` | A regression made the exit code 1. |
 | `severity` | `critical` \| `high` \| `medium` \| `low` \| `info` | `critical`: a check that went from passing to failing, or a broken import. `high`: a database or API break. `medium`: a visual problem. `low`: any change. `info`: fixed, already failing and notes. |
-| `scope` | `outside-scope` \| `expected-ripple` \| `in-scope` | See "How scope is decided" in the README. |
+| `scope` | `outside-scope` \| `broken-by-task` \| `expected-ripple` \| `in-scope` | `broken-by-task`: a regression in a direct dependent of a file, route or table the agent changed for the task. `expected-ripple`: such a dependent changed but didn't break. See "How scope is decided" in the README. |
 | `reason` | string | One line explaining the scope, e.g. `app/billing/page.tsx was edited by the agent, but the task doesn't name it …`. |
 | `title` | string | What happened. |
 | `detail` | string? | Check output (the command, the end of its output and the log path). |
@@ -64,7 +66,7 @@ The machine-readable JSON Schema is [`schema/after-report.v1.json`](../schema/af
 ```json
 {
   "schema": "holdline.after-report",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "task": "add pagination to the users list",
   "regressed": true,
   "exitCode": 1,

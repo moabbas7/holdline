@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import type { Finding, FindingMeta, Probe, ProbeReport } from '../types.js';
+import { tagOf, type Finding, type FindingMeta, type Probe, type ProbeReport } from '../types.js';
 import { captureSchema, dbCaptureFile, describeCapture, readCapture, settingsFrom, writeCapture } from './capture.js';
 import { changeKey, diffSchemas, schemaDrift, type SchemaChange } from './diff.js';
 import { captureLive } from './live/index.js';
@@ -25,11 +25,23 @@ export const databaseProbe: Probe<DbRef> = {
     ctx.io.progress('  database schema …');
     const started = Date.now();
     const capture = await captureSchema(ctx.root, settingsFrom(ctx.config));
-    const ref = await writeCapture(ctx.root, ctx.phase, capture);
+    const ref = await writeCapture(ctx.root, tagOf(ctx), capture);
     ctx.io.progressDone(ctx.io.c.dim(`Database schema: ${describeCapture(capture)} (${((Date.now() - started) / 1000).toFixed(1)}s)`));
     if (capture.live.message && (capture.live.status === 'refused' || capture.live.status === 'failed')) ctx.io.warn(capture.live.message);
     for (const w of capture.files.warnings.slice(0, 5)) ctx.io.warn(`Schema files: ${w}`);
     return ref;
+  },
+
+  // A live database can change without the working tree changing (a migration applied by
+  // hand), so a capture that read one is never reused; schema files alone are.
+  async saveBaseline(ref) {
+    return ref.live === 'ok' ? null : ref;
+  },
+
+  async restoreBaseline(kept, ctx) {
+    const c = await readCapture(ctx.root, kept as DbRef);
+    if ('error' in c || c.capture.live.status === 'ok') return null;
+    return writeCapture(ctx.root, tagOf(ctx), c.capture);
   },
 
   async compare(beforeRef, afterRef, ctx) {

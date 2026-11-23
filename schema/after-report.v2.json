@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "holdline.after-report.v2",
+  "title": "holdline after --json (schema version 2)",
+  "description": "The report printed by `holdline after --json`, also stored in .holdline/last-report.json and .holdline/reports/<timestamp>.json. See docs/report-schema.md.",
+  "type": "object",
+  "required": [
+    "schema",
+    "schemaVersion",
+    "task",
+    "createdAt",
+    "sessionCreatedAt",
+    "snapshots",
+    "headMoved",
+    "scope",
+    "regressed",
+    "exitCode",
+    "counts",
+    "summary",
+    "rollbackCommand",
+    "htmlReport",
+    "findings",
+    "probes",
+    "ownOutputs"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "holdline.after-report" },
+    "schemaVersion": { "const": 2 },
+    "task": { "type": "string" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "sessionCreatedAt": { "type": "string", "format": "date-time" },
+    "snapshots": {
+      "type": "object",
+      "required": ["before", "after"],
+      "additionalProperties": false,
+      "properties": { "before": { "type": "string" }, "after": { "type": "string" } }
+    },
+    "headMoved": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["from", "to"],
+          "additionalProperties": false,
+          "properties": { "from": { "type": ["string", "null"] }, "to": { "type": ["string", "null"] } }
+        }
+      ]
+    },
+    "scope": {
+      "type": "object",
+      "required": ["terms", "dropped", "unmatched", "globs", "globsGiven", "fallback", "files", "routes", "tables", "edited"],
+      "additionalProperties": false,
+      "properties": {
+        "terms": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["text", "kind", "files", "routes", "tables"],
+            "additionalProperties": false,
+            "properties": {
+              "text": { "type": "string" },
+              "kind": { "enum": ["path", "route", "name", "phrase", "word"] },
+              "files": { "type": "integer", "minimum": 0 },
+              "routes": { "type": "array", "items": { "type": "string" } },
+              "tables": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "dropped": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["text", "why"],
+            "additionalProperties": false,
+            "properties": { "text": { "type": "string" }, "why": { "type": "string" } }
+          }
+        },
+        "unmatched": { "type": "array", "items": { "type": "string" } },
+        "globs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["glob", "files"],
+            "additionalProperties": false,
+            "properties": { "glob": { "type": "string" }, "files": { "type": "integer", "minimum": 0 } }
+          }
+        },
+        "globsGiven": { "type": "array", "items": { "type": "string" } },
+        "fallback": { "type": "boolean" },
+        "files": { "type": "array", "items": { "type": "string" } },
+        "routes": { "type": "array", "items": { "type": "string" } },
+        "tables": { "type": "array", "items": { "type": "string" } },
+        "edited": {
+          "type": "object",
+          "required": ["inScope", "ripple", "outside"],
+          "additionalProperties": false,
+          "properties": {
+            "inScope": { "type": "integer", "minimum": 0 },
+            "ripple": { "type": "integer", "minimum": 0 },
+            "outside": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "regressed": { "type": "boolean" },
+    "exitCode": { "enum": [0, 1] },
+    "counts": {
+      "type": "object",
+      "required": ["outside-scope", "broken-by-task", "expected-ripple", "in-scope", "regressions", "footer"],
+      "additionalProperties": false,
+      "properties": {
+        "outside-scope": { "type": "integer", "minimum": 0 },
+        "broken-by-task": { "type": "integer", "minimum": 0 },
+        "expected-ripple": { "type": "integer", "minimum": 0 },
+        "in-scope": { "type": "integer", "minimum": 0 },
+        "regressions": { "type": "integer", "minimum": 0 },
+        "footer": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "summary": { "type": "array", "minItems": 1, "maxItems": 3, "items": { "type": "string" } },
+    "rollbackCommand": { "const": "holdline rollback" },
+    "htmlReport": { "type": ["string", "null"] },
+    "findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } },
+    "probes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "status", "summary"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "status": { "enum": ["ok", "changed", "regressed", "skipped"] },
+          "summary": { "type": "string" }
+        }
+      }
+    },
+    "ownOutputs": {
+      "type": "object",
+      "required": ["excluded", "agentEdited", "gitignoreSuggestion"],
+      "additionalProperties": false,
+      "properties": {
+        "excluded": { "type": "array", "items": { "type": "string" } },
+        "agentEdited": { "type": "array", "items": { "type": "string" } },
+        "gitignoreSuggestion": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  },
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "required": ["id", "probe", "kind", "severity", "scope", "reason", "title", "files", "lines", "notes"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "probe": { "type": "string" },
+        "kind": { "enum": ["regression", "fixed", "still-failing", "change", "info"] },
+        "severity": { "enum": ["critical", "high", "medium", "low", "info"] },
+        "scope": { "enum": ["in-scope", "expected-ripple", "broken-by-task", "outside-scope"] },
+        "reason": { "type": "string", "minLength": 1 },
+        "title": { "type": "string" },
+        "detail": { "type": "string" },
+        "files": { "type": "array", "items": { "type": "string" } },
+        "lines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["file", "line"],
+            "additionalProperties": false,
+            "properties": {
+              "file": { "type": "string" },
+              "line": { "type": "integer", "minimum": 1 },
+              "text": { "type": "string" }
+            }
+          }
+        },
+        "notes": { "type": "array", "items": { "type": "string" } },
+        "pages": { "type": "array", "items": { "type": "string" } },
+        "routes": { "type": "array", "items": { "type": "string" } },
+        "tables": { "type": "array", "items": { "type": "string" } },
+        "viewports": { "type": "array", "items": { "type": "string" } },
+        "affects": { "type": "array", "items": { "type": "string" } },
+        "images": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "before": { "type": "string" },
+            "after": { "type": "string" },
+            "diff": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

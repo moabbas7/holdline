@@ -93,6 +93,7 @@ export async function renderHtml(r: ScopedReport, root: string): Promise<string>
     `<section class="${cls}"><h2>${esc(title)} <span class="n">(${list.length})</span></h2>${list.length ? (await Promise.all(list.map((f) => findingHtml(root, f)))).join('') : '<p class="empty">Nothing here.</p>'}</section>`;
 
   const outside = main.filter((f) => f.scope === 'outside-scope');
+  const broken = main.filter((f) => f.scope === 'broken-by-task');
   const ripple = main.filter((f) => f.scope === 'expected-ripple');
   const inScope = main.filter((f) => f.scope === 'in-scope');
   const inRegs = inScope.filter((f) => f.kind === 'regression');
@@ -133,6 +134,7 @@ export async function renderHtml(r: ScopedReport, root: string): Promise<string>
 ${r.headMoved ? `<div class="meta">HEAD moved during the task: ${esc(String(r.headMoved.from).slice(0, 10))} → ${esc(String(r.headMoved.to).slice(0, 10))}</div>` : ''}
 <div class="summary${r.regressed ? ' bad' : ''}">${r.summary.map((l) => `<p>${esc(l)}</p>`).join('')}<div class="meta">Undo everything: <span class="cmd mono">${esc(r.rollbackCommand)}</span></div></div>
 ${await section('Outside the task', outside, 'outside-scope')}
+${await section("Broken by the task's changes", broken, 'broken-by-task')}
 ${await section('Expected ripple', ripple, 'expected-ripple')}
 ${inHtml}
 ${footerHtml}

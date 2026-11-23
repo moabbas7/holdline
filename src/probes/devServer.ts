@@ -8,6 +8,7 @@
  * probes in one `before`/`after` share it.
  */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { createWriteStream, mkdirSync, type WriteStream } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
@@ -17,6 +18,56 @@ import { isLocalHost, parseConnectionString } from './database/live/target.js';
 
 const SUPABASE_VARS = ['SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_URL'];
 const KILL_GRACE_MS = 3000;
+const TAIL_BYTES = 16 * 1024;
+
+// --- Next.js stopping its dev server for AI agents ------------------------------------------
+
+/**
+ * Environment variables that tell tools an AI agent is running (the names @vercel/detect-agent,
+ * which Next.js uses, looks for). holdline runs inside the agent's environment when it runs
+ * from a hook, so the dev server sees them too. holdline never hides or changes them.
+ */
+export const AGENT_ENV_VARS = [
+  'AI_AGENT',
+  'CLAUDECODE',
+  'CLAUDE_CODE',
+  'CLAUDE_CODE_ENTRYPOINT',
+  'CURSOR_AGENT',
+  'CURSOR_TRACE_ID',
+  'CODEX_SANDBOX',
+  'CODEX_THREAD_ID',
+  'CODEX_CI',
+  'GEMINI_CLI',
+  'OPENCODE',
+  'AUGMENT_AGENT',
+  'ANTIGRAVITY_AGENT',
+  'REPL_ID',
+];
+
+export const agentVarsIn = (env: NodeJS.ProcessEnv) => AGENT_ENV_VARS.filter((v) => env[v] !== undefined && env[v] !== '');
+
+const NEXT_AGENT_STOP = /This command stopped to show the upgrade recommendation|UpgradeNudgeError|SecurityFatalError/;
+
+/**
+ * Next.js 16.4+ stops `next dev` (exit code 1) when it detects an AI agent and the project
+ * sets `experimental.agentUpgrade`: it prints an upgrade recommendation for the agent instead
+ * of starting. Returns the explanation, or null when the output isn't that.
+ */
+export function nextAgentStopMessage(output: string, env: NodeJS.ProcessEnv): string | null {
+  if (!NEXT_AGENT_STOP.test(output)) return null;
+  const clean = output.replace(/\x1b\[[0-9;]*m/g, '');
+  const summary =
+    /Next\.js [\w.-]+ is available\. You're using [\w.-]+\./.exec(clean)?.[0] ??
+    (/affected by a known security vulnerability/.test(clean) ? 'Your version of Next.js is affected by a known security vulnerability.' : null) ??
+    (/includes Future Defaults/.test(clean) ? 'Next.js recommends adopting its Future Defaults.' : null);
+  const vars = agentVarsIn(env);
+  return (
+    `Next.js stopped \`next dev\` before it started: it detected an AI agent${vars.length ? ` (${vars.join(', ')} ${vars.length === 1 ? 'is' : 'are'} set)` : ''} ` +
+    `and the project sets experimental.agentUpgrade, so it shows an upgrade recommendation instead${summary ? ` ("${summary}")` : ''}. ` +
+    'holdline does not hide agent variables or retry around this, so this check was skipped. To run it: upgrade Next.js (npx next upgrade), ' +
+    'remove experimental.agentUpgrade from next.config, or run `holdline before`/`holdline after` from a terminal outside the agent.'
+  );
+}
 
 // --- Database host check --------------------------------------------------------------
 
@@ -160,6 +211,11 @@ export async function devCommand(root: string, pm: PackageManager): Promise<stri
   return null;
 }
 
+/** SIGKILL every running dev server's process group (a hook out of time). */
+export function killAllDevServers(): void {
+  for (const c of active) killGroupSync(c, 'SIGKILL');
+}
+
 // Signal handlers are installed while at least one server is running.
 let signalHandlersInstalled = 0;
 const onSignal = (sig: NodeJS.Signals) => {
@@ -191,6 +247,8 @@ export interface StartOptions {
   env?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
   progress?: (msg: string) => void;
+  /** Where the server's output goes (default: discarded, except the last few KB kept in memory). */
+  logFile?: string;
 }
 
 export interface RunningServer {
@@ -203,7 +261,8 @@ export interface RunningServer {
   /** Kill the whole process tree. Safe to call more than once. */
   stop(): Promise<void>;
 }
-export type ServerFailure = { ok: false; status: 'failed' | 'refused'; message: string };
+/** `skipped`: the server stopped itself on purpose (Next.js's agent upgrade stop); not a holdline or app failure. */
+export type ServerFailure = { ok: false; status: 'failed' | 'refused' | 'skipped'; message: string };
 export type StartResult = RunningServer | ServerFailure;
 
 /** Start a dev server on a free port and wait until it accepts TCP connections. */
@@ -219,10 +278,30 @@ export async function startDevServer(opts: StartOptions): Promise<StartResult> {
     cwd: opts.root,
     shell: true,
     detached: process.platform !== 'win32',
-    stdio: ['ignore', 'ignore', 'ignore'],
+    stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...env, PORT: String(port), BROWSER: 'none', FORCE_COLOR: '0' },
   });
   active.add(child);
+  // Keep reading the output (a full pipe would stall the server); keep the end in memory.
+  let tail = Buffer.alloc(0);
+  let log: WriteStream | null = null;
+  if (opts.logFile) {
+    try {
+      mkdirSync(path.dirname(opts.logFile), { recursive: true });
+      log = createWriteStream(opts.logFile);
+      log.on('error', () => (log = null));
+    } catch {
+      log = null;
+    }
+  }
+  const onData = (d: Buffer) => {
+    log?.write(d);
+    tail = Buffer.concat([tail, d]);
+    if (tail.length > TAIL_BYTES * 2) tail = tail.subarray(tail.length - TAIL_BYTES);
+  };
+  child.stdout?.on('data', onData);
+  child.stderr?.on('data', onData);
+  const output = () => tail.toString('utf8');
   if (!exitHook) {
     exitHook = true;
     process.on('exit', () => {
@@ -238,6 +317,7 @@ export async function startDevServer(opts: StartOptions): Promise<StartResult> {
       await killTree(child);
     } finally {
       removeSignalHandlers();
+      log?.end();
     }
   };
 
@@ -250,7 +330,13 @@ export async function startDevServer(opts: StartOptions): Promise<StartResult> {
     let host: string | null = null;
     while (!host) {
       if (opts.signal?.aborted) throw new StartFailure('cancelled');
-      if (exited !== undefined) throw new StartFailure(`the dev server (${command}) exited with code ${exited} before it was ready`);
+      if (exited !== undefined) {
+        // Let the last output arrive before reading it.
+        await new Promise((r) => setTimeout(r, 100));
+        const why = nextAgentStopMessage(output(), env);
+        if (why) throw new StartSkipped(why);
+        throw new StartFailure(`the dev server (${command}) exited with code ${exited} before it was ready`);
+      }
       if (Date.now() > deadline) throw new StartFailure(`the dev server did not accept connections on port ${port} within ${opts.startupTimeoutSec}s`);
       for (const h of ['127.0.0.1', '::1']) {
         if (await tcpOpen(h, port)) {
@@ -264,12 +350,14 @@ export async function startDevServer(opts: StartOptions): Promise<StartResult> {
     return { ok: true, origin, port, command, stop, exited: () => (stopped ? undefined : (exited ?? undefined)) };
   } catch (e) {
     await stop();
+    if (e instanceof StartSkipped) return { ok: false, status: 'skipped', message: e.message };
     if (e instanceof StartFailure) return { ok: false, status: 'failed', message: e.message };
     return { ok: false, status: 'failed', message: `the dev server could not be started: ${(e as Error).message}` };
   }
 }
 
 class StartFailure extends Error {}
+class StartSkipped extends Error {}
 
 // --- Pool ---------------------------------------------------------------------------------
 

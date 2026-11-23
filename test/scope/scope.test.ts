@@ -88,16 +88,41 @@ describe('task scope: classification of findings', { timeout: 120_000 }, () => {
     expect(out).toContain('Expected ripple (1)');
   });
 
-  it('a regression in a direct dependent of a shared file changed for the task is expected ripple', async () => {
+  it('a regression in a direct dependent of a shared file changed for the task is broken by the task', async () => {
     const t = await scopeRepo();
-    const { report } = await runTask(t, 'show full names on the users page', (t) => {
+    const { report, out } = await runTask(t, 'show full names on the users page', (t) => {
       edit(t, 'lib/format.ts', 'export function formatMoney', 'export function formatMoneyCents');
     });
     const broken = report.scoped.findings.find((f) => f.probe === 'dependencies' && f.kind === 'regression');
     expect(broken?.title).toMatch(/app\/billing\/page\.tsx/);
-    expect(broken?.scope).toBe('expected-ripple');
+    expect(broken?.scope).toBe('broken-by-task');
     expect(broken?.reason).toBe('app/billing/page.tsx imports formatMoney from lib/format.ts, which the agent changed for the task');
     expect(broken?.severity).toBe('critical');
+    // Expected ripple only holds changes that didn't break anything.
+    expect(group(report, 'expected-ripple').filter((f) => f.kind === 'regression')).toEqual([]);
+    expect(report.scoped.counts['broken-by-task']).toBeGreaterThanOrEqual(1);
+    // Shown right after "Outside the task", before expected ripple.
+    expect(out).toMatch(/Broken by the task's changes \(\d+\)/);
+    const iBroken = out.indexOf("Broken by the task's changes");
+    const iRipple = out.indexOf('Expected ripple');
+    if (iRipple > -1) expect(iBroken).toBeLessThan(iRipple);
+    const iOutside = out.indexOf('Outside the task');
+    if (iOutside > -1) expect(iOutside).toBeLessThan(iBroken);
+    expect(report.scoped.summary.join(' ')).toMatch(/The task's changes broke 1 thing that uses them: a broken import in app\/billing\/page\.tsx/);
+  });
+
+  it('a file that uses a task file, edited by the agent and left broken, is broken by the task (not inside the task area)', async () => {
+    const t = await scopeRepo();
+    const { report, out } = await runTask(t, 'add a formatBytes helper to lib/format.ts', (t) => {
+      edit(t, 'lib/format.ts', 'export function formatMoney', 'export function formatBytes(n: number): string {\n  return `${n} B`;\n}\n\nexport function formatMoney');
+      edit(t, 'app/billing/page.tsx', "from '@/lib/format';", "from '@/lib/formatting';");
+    });
+    const broken = report.scoped.findings.find((f) => f.probe === 'dependencies' && f.kind === 'regression')!;
+    expect(broken.files).toEqual(['app/billing/page.tsx']);
+    expect(broken.scope).toBe('broken-by-task');
+    expect(broken.reason).toBe('app/billing/page.tsx uses lib/format.ts, which the task covers; it was edited during the task and is broken now');
+    expect(group(report, 'in-scope').filter((f) => f.kind === 'regression')).toEqual([]);
+    expect(out).toContain("Broken by the task's changes (1)");
   });
 
   it('ripple follows re-exports (barrel files) by name: users of the changed helper only', async () => {
@@ -181,7 +206,7 @@ describe('task scope: classification of findings', { timeout: 120_000 }, () => {
     expect(out).toContain("Scope: the task text matched nothing in the project; the agent's edits are taken as the task area");
   });
 
-  it('a schema change to a task table that breaks a direct user of the table is expected ripple', async () => {
+  it('a schema change to a task table that breaks a direct user of the table is broken by the task', async () => {
     const t = await scopeRepo();
     const { report } = await runTask(t, 'add a bio column to users', (t) => {
       t.write('supabase/migrations/0002_users_bio.sql', 'alter table users add column bio text;\nalter table users drop column email;\n');
@@ -190,7 +215,7 @@ describe('task scope: classification of findings', { timeout: 120_000 }, () => {
     expect(dropped.title).toMatch(/email/);
     expect(dropped.tables).toEqual(['users']);
     expect(dropped.lines).toEqual([{ file: 'app/api/invoices/route.ts', line: 6, text: expect.any(String) }]);
-    expect(dropped.scope).toBe('expected-ripple');
+    expect(dropped.scope).toBe('broken-by-task');
     expect(dropped.reason).toBe(
       'table users matches "users" in the task; app/api/invoices/route.ts uses table users, which supabase/migrations/0002_users_bio.sql changes for the task',
     );

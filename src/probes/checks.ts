@@ -28,6 +28,15 @@ export const checksProbe: Probe<ChecksSnapshot> = {
     return CHECK_NAMES.some((n) => config.checks[n] !== null);
   },
 
+  async saveBaseline(data) {
+    return data;
+  },
+
+  async restoreBaseline(kept) {
+    const k = kept as ChecksSnapshot | null;
+    return k && typeof k === 'object' && k.results && typeof k.results === 'object' ? k : null;
+  },
+
   async snapshot(ctx) {
     const results: ChecksSnapshot['results'] = {};
     for (const name of CHECK_NAMES) {

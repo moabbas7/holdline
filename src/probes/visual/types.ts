@@ -110,7 +110,8 @@ export interface PageResult extends PageSignals {
 
 export interface VisualCapture {
   version: number;
-  status: 'ok' | 'off' | 'unavailable' | 'refused' | 'failed';
+  /** skipped: the dev server stopped itself on purpose (Next.js's agent upgrade stop). */
+  status: 'ok' | 'off' | 'unavailable' | 'refused' | 'failed' | 'skipped';
   message?: string;
   results: PageResult[];
   ms: number;

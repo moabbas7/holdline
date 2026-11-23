@@ -12,7 +12,7 @@ import { cleanupAll, fakeIo, tmpDir } from '../helpers/tmpRepo.js';
 import { edit, runTask, scopeRepo } from '../scope/helpers.js';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const SCHEMA = JSON.parse(readFileSync(path.join(REPO, 'schema/after-report.v1.json'), 'utf8'));
+const SCHEMA = JSON.parse(readFileSync(path.join(REPO, 'schema/after-report.v2.json'), 'utf8'));
 const ajv = new (Ajv2020 as unknown as typeof Ajv2020.default)({ strict: true, allErrors: true, validateFormats: false });
 const validate = ajv.compile(SCHEMA);
 
@@ -51,6 +51,25 @@ describe('HTML report', { timeout: 120_000 }, () => {
     expect(html).toContain('holdline rollback');
     // Only the HTML and its sidecar JSON in the reports folder.
     expect(readdirSync(t.p('.holdline/reports')).sort()).toEqual([path.basename(report.scoped.htmlReport!), path.basename(report.scoped.htmlReport!).replace('.html', '.json')]);
+  });
+
+  it('puts "Broken by the task\'s changes" right after "Outside the task"', async () => {
+    const t = await scopeRepo();
+    const { report } = await runTask(t, 'show full names on the users page', (t) => {
+      edit(t, 'lib/format.ts', 'export function formatMoney', 'export function formatMoneyCents');
+      edit(t, 'app/page.tsx', '  return <h1>', '  const b = BROKEN;\n  return <h1>');
+    });
+    const html = t.read(report.scoped.htmlReport!);
+    const iOut = html.indexOf('Outside the task');
+    const iBroken = html.indexOf('Broken by the task&#39;s changes');
+    const iRipple = html.indexOf('Expected ripple');
+    const iIn = html.indexOf('In the task area');
+    expect(iOut).toBeGreaterThan(-1);
+    expect(iOut).toBeLessThan(iBroken);
+    expect(iBroken).toBeLessThan(iRipple);
+    expect(iRipple).toBeLessThan(iIn);
+    expect(html.slice(iBroken, iRipple)).toContain('app/billing/page.tsx');
+    expect(report.scoped.findings.filter((f) => f.scope === 'expected-ripple' && f.kind === 'regression')).toEqual([]);
   });
 
   it('embeds screenshots and diff images as data: URIs and escapes text', async () => {
@@ -95,11 +114,12 @@ describe('HTML report', { timeout: 120_000 }, () => {
 });
 
 describe('JSON report', { timeout: 180_000 }, () => {
-  it('matches the documented schema (version 1), in every shape the fixtures produce', async () => {
+  it('matches the documented schema (version 2), in every shape the fixtures produce', async () => {
     const cases: [string, (t: Parameters<typeof edit>[0]) => void][] = [
       ['add pagination to the users list', BREAK_BILLING],
       ['show full names on the users page', (t) => edit(t, 'lib/format.ts', '.trim()', '.trim().toUpperCase()')],
       ['add a bio column to users', (t) => t.write('supabase/migrations/0002_bio.sql', 'alter table users drop column email;\n')],
+      ['show full names on the users page', (t) => edit(t, 'lib/format.ts', 'export function formatMoney', 'export function formatMoneyCents')],
     ];
     for (const [task, agent] of cases) {
       const t = await scopeRepo();
@@ -116,7 +136,7 @@ describe('JSON report', { timeout: 180_000 }, () => {
   });
 
   it('the schema rejects documents that drift from it', () => {
-    expect(validate({ schema: 'holdline.after-report', schemaVersion: 2 })).toBe(false);
+    expect(validate({ schema: 'holdline.after-report', schemaVersion: 3 })).toBe(false);
   });
 });
 

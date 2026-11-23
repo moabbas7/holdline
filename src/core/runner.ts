@@ -29,9 +29,12 @@ function killTree(child: ChildProcess, signal: NodeJS.Signals): void {
   }
 }
 
-process.on('exit', () => {
+process.on('exit', () => killAllChecks());
+
+/** SIGKILL every running check's process group (a hook out of time). */
+export function killAllChecks(): void {
   for (const child of active) killTree(child, 'SIGKILL');
-});
+}
 
 /**
  * Run a shell command in `cwd`, streaming combined output to `logFile`.

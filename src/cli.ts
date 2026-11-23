@@ -5,7 +5,9 @@ import { afterCommand } from './commands/after.js';
 import { apiCommand } from './commands/api.js';
 import { beforeCommand } from './commands/before.js';
 import { dbCommand } from './commands/db.js';
+import { doctorCommand } from './commands/doctor.js';
 import { graphCommand } from './commands/graph.js';
+import { installHooksCommand, uninstallHooksCommand } from './commands/hooks.js';
 import { initCommand } from './commands/init.js';
 import { pruneCommand } from './commands/prune.js';
 import { reportCommand } from './commands/report.js';
@@ -15,6 +17,7 @@ import { unlockCommand } from './commands/unlock.js';
 import { visualCommand } from './commands/visual.js';
 import { HoldlineError } from './core/errors.js';
 import { GitError } from './core/git.js';
+import { hookCli } from './hooks/run.js';
 import { createCliIo } from './io.js';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
@@ -71,7 +74,8 @@ program
   .option('-f, --force', 'replace an existing session without asking')
   .option('-y, --yes', 'non-interactive: replace an existing session, continue past warnings')
   .option('-s, --scope <glob>', 'files that are part of the task (repeatable), e.g. --scope "app/users/**"', (v: string, prev: string[]) => [...prev, v], [] as string[])
-  .action((o: { task: string; force?: boolean; yes?: boolean; scope: string[] }) =>
+  .option('--reuse-baseline', 'reuse the results of the last `after` when the working tree is exactly what it checked')
+  .action((o: { task: string; force?: boolean; yes?: boolean; scope: string[]; reuseBaseline?: boolean }) =>
     run(async () => void (await beforeCommand(process.cwd(), o, createCliIo()))),
   );
 
@@ -163,6 +167,31 @@ program
   .action((o: { keep: number; dryRun?: boolean }) =>
     run(async () => void (await pruneCommand(process.cwd(), o, createCliIo()))),
   );
+
+program
+  .command('install-hooks')
+  .description('run holdline automatically around Claude Code tasks (adds hooks to .claude/settings.local.json)')
+  .option('--shared', 'install in .claude/settings.json for the whole team instead')
+  .option('--command <command>', 'how the hooks should call holdline (default: detected)')
+  .action((o: { shared?: boolean; command?: string }) => run(async () => void (await installHooksCommand(process.cwd(), o, createCliIo()))));
+
+program
+  .command('uninstall-hooks')
+  .description("remove holdline's Claude Code hooks (only holdline's; other settings stay)")
+  .option('--shared', 'remove them from .claude/settings.json instead')
+  .action((o: { shared?: boolean }) => run(async () => void (await uninstallHooksCommand(process.cwd(), o, createCliIo()))));
+
+program
+  .command('doctor')
+  .description('check the config, Claude Code hooks, git state, Playwright, database safety and the lock, and say what to fix')
+  .action(() => run(async () => (await doctorCommand(process.cwd(), {}, createCliIo())).exitCode));
+
+// Called by the Claude Code hooks (always exits 0: holdline never blocks a session).
+program
+  .command('hook <event>', { hidden: true })
+  .option('--root <dir>')
+  .option('--session <id>')
+  .action((event: string, o: { root?: string; session?: string }) => hookCli(event, o));
 
 program
   .command('unlock')

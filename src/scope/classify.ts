@@ -1,6 +1,7 @@
 /**
  * Classifies every finding as in scope (the task's own area), expected ripple (direct
- * dependents of files changed for the task) or outside scope, with a one-line reason.
+ * dependents of files changed for the task, when nothing broke), broken by the task (a
+ * regression in such a dependent) or outside scope, with a one-line reason.
  *
  * - Scope files: files the task text or a --scope glob names ("core"), plus files the agent
  *   edited that are attached to them: next to a core file in a small folder (≤ 10 source
@@ -19,10 +20,15 @@ import type { DepGraph } from '../probes/dependencies/types.js';
 import type { Finding, FindingMeta, ProbeReport } from '../probes/types.js';
 import { matchesScopeGlob, pageFiles, segmentWords, termMatchesFile, toPattern, type TaskScope } from './taskScope.js';
 
-export type ScopeClass = 'in-scope' | 'expected-ripple' | 'outside-scope';
+export type ScopeClass = 'in-scope' | 'expected-ripple' | 'broken-by-task' | 'outside-scope';
 export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info';
 
-export const SCOPE_RANK: Record<ScopeClass, number> = { 'in-scope': 0, 'expected-ripple': 1, 'outside-scope': 2 };
+/**
+ * Distance from the task. `broken-by-task` is only assigned at the very end of classifyOne
+ * (a regression that would otherwise be expected ripple), so the comparisons while placing a
+ * finding only ever see the other three.
+ */
+export const SCOPE_RANK: Record<ScopeClass, number> = { 'in-scope': 0, 'expected-ripple': 1, 'broken-by-task': 2, 'outside-scope': 3 };
 export const SEVERITY_RANK: Record<Severity, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
 
 /** Small folders are feature folders: a file next to a task file there belongs to the task. */
@@ -111,6 +117,12 @@ export class ScopeModel {
   readonly tableIn = new Map<string, string>();
   readonly edited = new Set<string>();
   readonly changedForTask = new Set<string>();
+  /**
+   * Edited files that joined the task area only because they import a task file: users of
+   * what the task covers. A regression in one is broken by the task's changes, not "inside
+   * the task" (the agent edited a caller and left it broken).
+   */
+  readonly dependentEdits = new Map<string, string>();
   /** How strongly each core file is tied to the task (0: a path or glob … 4: a single word). */
   private readonly corePriority = new Map<string, number>();
   readonly area: ScopeArea;
@@ -200,7 +212,10 @@ export class ScopeModel {
           continue;
         }
         const link = this.importLink(p, core);
-        if (link) this.inScope.set(p, `${link.dir === 'out' ? 'imports' : 'is imported by'} ${link.other}, which ${this.inScope.get(link.other)}`);
+        if (link) {
+          this.inScope.set(p, `${link.dir === 'out' ? 'imports' : 'is imported by'} ${link.other}, which ${this.inScope.get(link.other)}`);
+          if (link.dir === 'out') this.dependentEdits.set(p, link.other);
+        }
       }
       // New helpers pulled in by attached files: imported by a file already attached.
       for (let changed = true; changed; ) {
@@ -547,6 +562,23 @@ function classifyOne(model: ScopeModel, rep: ProbeReport, f: Finding, input: Cla
   if (meta.visualDiff && level.scope === 'outside-scope') {
     title = title.replace(/: looks different \(/, ': unexpected visual change (');
     if (input.failOnUnexpectedVisual) kind = 'regression';
+  }
+
+  // A regression in a direct dependent of the task's changes is not "expected": the task's
+  // changes broke code that uses them (a renamed option its callers still pass).
+  if (kind === 'regression' && level.scope === 'expected-ripple') {
+    level = { scope: 'broken-by-task', reason: level.reason };
+  } else if (kind === 'regression' && level.scope === 'in-scope') {
+    // Inside the task area only because the agent edited a file that uses a task file, and
+    // that file is what broke: the task's changes broke a user of what it covers.
+    const subjects = [...new Set([...files, ...locations.map((l) => l.file)])].filter((f) => model.fileWhy(f).scope === 'in-scope');
+    if (subjects.length && subjects.every((f) => model.dependentEdits.has(f))) {
+      const f = subjects[0]!;
+      level = {
+        scope: 'broken-by-task',
+        reason: `${f}${subjects.length > 1 ? ` (and ${subjects.length - 1} more)` : ''} uses ${model.dependentEdits.get(f)}, which the task covers; it was edited during the task and is broken now`,
+      };
+    }
   }
 
   // holdline's own analysis running out of time says nothing about the code: a note, not a change.

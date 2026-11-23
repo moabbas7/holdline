@@ -74,7 +74,8 @@ export interface LiveRequestResult {
 }
 
 export interface LiveCapture {
-  status: 'off' | 'ok' | 'refused' | 'failed';
+  /** skipped: the dev server stopped itself on purpose (Next.js's agent upgrade stop). */
+  status: 'off' | 'ok' | 'refused' | 'failed' | 'skipped';
   message?: string;
   results: LiveRequestResult[];
   ms?: number;

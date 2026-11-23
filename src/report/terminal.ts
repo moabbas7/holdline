@@ -47,6 +47,7 @@ function printFinding(f: ReportFinding, io: Io): void {
 
 const HEADINGS: Record<ScopeClass, string> = {
   'outside-scope': 'Outside the task',
+  'broken-by-task': "Broken by the task's changes",
   'expected-ripple': 'Expected ripple',
   'in-scope': 'In the task area',
 };
@@ -74,7 +75,7 @@ export function printScopedReport(r: ScopedReport, io: Io, opts: PrintOptions = 
   }
 
   const main = r.findings.filter((f) => !isFooter(f));
-  for (const scope of ['outside-scope', 'expected-ripple', 'in-scope'] as const) {
+  for (const scope of ['outside-scope', 'broken-by-task', 'expected-ripple', 'in-scope'] as const) {
     const group = main.filter((f) => f.scope === scope);
     if (scope === 'in-scope') {
       const regs = group.filter((f) => f.kind === 'regression');
@@ -98,7 +99,7 @@ export function printScopedReport(r: ScopedReport, io: Io, opts: PrintOptions = 
     if (!group.length) continue;
     io.log();
     const title = `${HEADINGS[scope]} (${group.length})`;
-    io.log(scope === 'outside-scope' && group.some((f) => f.kind === 'regression') ? io.c.red(io.c.bold(title)) : io.c.bold(title));
+    io.log((scope === 'outside-scope' || scope === 'broken-by-task') && group.some((f) => f.kind === 'regression') ? io.c.red(io.c.bold(title)) : io.c.bold(title));
     for (const f of group) printFinding(f, io);
   }
 

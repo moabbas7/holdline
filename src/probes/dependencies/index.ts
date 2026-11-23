@@ -1,4 +1,4 @@
-import type { Finding, Probe, ProbeReport } from '../types.js';
+import { tagOf, type Finding, type Probe, type ProbeReport } from '../types.js';
 import { brokenKey, brokenTitle, describeDependents, summarizeDependents } from './format.js';
 import { buildGraph, dependentsOf, indexGraph, rememberGraph, type GraphIndex } from './graph.js';
 import { readGraph, writeGraph } from './store.js';
@@ -22,7 +22,7 @@ export const dependenciesProbe: Probe<DepGraphRef> = {
   async snapshot(ctx) {
     ctx.io.progress('  dependency graph …');
     const graph = await buildGraph(ctx.root, { projectType: ctx.config.projectType });
-    const ref = await writeGraph(ctx.root, ctx.phase, graph);
+    const ref = await writeGraph(ctx.root, tagOf(ctx), graph);
     rememberGraph(ctx.root, ctx.snapshotSha, graph);
     const s = graph.stats;
     ctx.io.progressDone(
@@ -32,6 +32,17 @@ export const dependenciesProbe: Probe<DepGraphRef> = {
       ),
     );
     return ref;
+  },
+
+  async saveBaseline(ref) {
+    return ref;
+  },
+
+  async restoreBaseline(kept, ctx) {
+    const g = await readGraph(ctx.root, kept as DepGraphRef);
+    if ('error' in g) return null;
+    rememberGraph(ctx.root, ctx.snapshotSha, g.graph);
+    return writeGraph(ctx.root, tagOf(ctx), g.graph);
   },
 
   async compare(beforeRef, afterRef, ctx) {

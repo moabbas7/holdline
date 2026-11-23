@@ -4,14 +4,14 @@
  * app's own origin, and blank or error screens. Playwright is optional and loaded lazily.
  */
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { cp, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import type { Config, PackageManager } from '../../core/config.js';
 import { readSession } from '../../core/session.js';
 import { HOLDLINE_DIR } from '../../core/store.js';
 import { writeCompactJson } from '../dependencies/store.js';
 import { DevServerPool } from '../devServer.js';
-import type { Probe, ProbeReport } from '../types.js';
+import { tagOf, type BaselineTag, type Probe, type ProbeReport } from '../types.js';
 import { VISUAL_CAPTURE_VERSION, visualSettings, type PageResult, type VisualCapture, type VisualRef, type VisualSettings } from './types.js';
 
 export function visualSettingsFrom(config: Config | null): VisualSettings {
@@ -21,13 +21,15 @@ export function visualSettingsFrom(config: Config | null): VisualSettings {
 
 export const visualDir = (root: string) => path.join(root, HOLDLINE_DIR, 'visual');
 export type VisualMode = 'before' | 'after' | 'current';
-const captureFile = (root: string, mode: VisualMode) => path.join(visualDir(root), `visual-${mode}.json`);
+const captureFile = (root: string, mode: string) => path.join(visualDir(root), `visual-${mode}.json`);
 
 export interface RunVisualOptions {
   root: string;
   settings: VisualSettings;
   packageManager: PackageManager;
   mode: VisualMode;
+  /** Folder name for the screenshots under .holdline/visual/ (default: the mode). */
+  outTag?: string;
   /** probes.database.envVar */
   dbEnvVar?: string;
   /** Shared dev servers for this run; without one a private pool is used and disposed. */
@@ -96,7 +98,7 @@ export async function runVisual(o: RunVisualOptions): Promise<VisualCapture> {
         origin,
         settings: o.settings,
         mode: o.mode,
-        outDir: path.join(visualDir(o.root), o.mode),
+        outDir: path.join(visualDir(o.root), o.outTag ?? o.mode),
         ...(storageState?.ok ? { storageState: storageState.state } : {}),
         ...(o.before ? { before: o.before } : {}),
         ...(o.progress ? { progress: o.progress } : {}),
@@ -119,7 +121,7 @@ export async function runVisual(o: RunVisualOptions): Promise<VisualCapture> {
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
-export async function writeVisualCapture(root: string, mode: VisualMode, capture: VisualCapture): Promise<VisualRef> {
+export async function writeVisualCapture(root: string, mode: string, capture: VisualCapture): Promise<VisualRef> {
   const file = captureFile(root, mode);
   const text = await writeCompactJson(file, capture);
   return { file: path.relative(root, file).split(path.sep).join('/'), sha256: sha256(text), status: capture.status, pages: new Set(capture.results.map((r) => r.page)).size };
@@ -180,15 +182,42 @@ export const visualProbe: Probe<VisualRef> = {
       settings,
       packageManager: ctx.config.packageManager,
       mode: ctx.phase,
+      outTag: tagOf(ctx),
       ...(typeof db?.envVar === 'string' ? { dbEnvVar: db.envVar } : {}),
       ...(ctx.devServers ? { pool: ctx.devServers } : {}),
       ...(before ? { before } : {}),
       progress: (m) => ctx.io.progress(m),
     });
-    const ref = await writeVisualCapture(ctx.root, ctx.phase, capture);
+    const ref = await writeVisualCapture(ctx.root, tagOf(ctx), capture);
     ctx.io.progressDone(ctx.io.c.dim(`Visual: ${describeVisualCapture(capture)} (${((Date.now() - started) / 1000).toFixed(1)}s)`));
     if (capture.status !== 'ok' && capture.message) ctx.io.warn(`Visual check: ${capture.message}`);
     return ref;
+  },
+
+  // Only a real "before" capture is a baseline: it loads every page twice and records noisy
+  // regions and flaky signals. An "after" capture doesn't, so it is never reused.
+  async saveBaseline(ref, ctx) {
+    return ctx.phase === 'before' ? { ref, tag: tagOf(ctx) } : null;
+  },
+
+  async restoreBaseline(kept, ctx) {
+    const k = kept as { ref?: VisualRef; tag?: BaselineTag } | null;
+    if (!k?.ref || !k.tag) return null;
+    const c = await readVisualCapture(ctx.root, k.ref);
+    if ('error' in c) return null;
+    const to = tagOf(ctx);
+    if (to === k.tag) return k.ref;
+    const from = path.join(visualDir(ctx.root), k.tag);
+    const dest = path.join(visualDir(ctx.root), to);
+    await rm(dest, { recursive: true, force: true });
+    try {
+      await cp(from, dest, { recursive: true });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+    }
+    // Screenshot paths are repo-relative: .holdline/visual/<tag>/<file>.png.
+    const moved = JSON.parse(JSON.stringify(c.capture).replaceAll(`"${HOLDLINE_DIR}/visual/${k.tag}/`, `"${HOLDLINE_DIR}/visual/${to}/`)) as VisualCapture;
+    return writeVisualCapture(ctx.root, to, moved);
   },
 
   async compare(beforeRef, afterRef, ctx): Promise<ProbeReport> {

@@ -6,7 +6,7 @@ import { HOLDLINE_DIR } from '../../core/store.js';
 import { buildGraph, recallGraph } from '../dependencies/graph.js';
 import { writeCompactJson } from '../dependencies/store.js';
 import type { DepGraph } from '../dependencies/types.js';
-import type { Probe, ProbeReport } from '../types.js';
+import { tagOf, type Probe, type ProbeReport } from '../types.js';
 import { compareApi } from './diff.js';
 import type { DevServerPool } from '../devServer.js';
 import { runLive } from './live.js';
@@ -59,10 +59,10 @@ export async function captureApi(root: string, config: Config | null, opts: Capt
 
 // --- Storage (.holdline/api/api-<phase>.json) -------------------------------------------
 
-export const apiCaptureFile = (root: string, phase: 'before' | 'after') => path.join(root, HOLDLINE_DIR, 'api', `api-${phase}.json`);
+export const apiCaptureFile = (root: string, phase: string) => path.join(root, HOLDLINE_DIR, 'api', `api-${phase}.json`);
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
-export async function writeApiCapture(root: string, phase: 'before' | 'after', capture: ApiCapture): Promise<ApiRef> {
+export async function writeApiCapture(root: string, phase: string, capture: ApiCapture): Promise<ApiRef> {
   const file = apiCaptureFile(root, phase);
   const text = await writeCompactJson(file, capture);
   return { file: path.relative(root, file).split(path.sep).join('/'), sha256: sha256(text), routes: Object.keys(capture.routes).length, live: capture.live.status };
@@ -114,11 +114,20 @@ export const apiProbe: Probe<ApiRef> = {
     const known = recallGraph(ctx.root, ctx.snapshotSha);
     const { capture, graph } = await captureApi(ctx.root, ctx.config, { live: true, progress: (m) => ctx.io.progress(m), ...(known ? { graph: known } : {}), ...(ctx.devServers ? { pool: ctx.devServers } : {}) });
     if (ctx.phase === 'after') lastAfter = { root: ctx.root, graph };
-    const ref = await writeApiCapture(ctx.root, ctx.phase, capture);
+    const ref = await writeApiCapture(ctx.root, tagOf(ctx), capture);
     ctx.io.progressDone(ctx.io.c.dim(`API: ${describeApiCapture(capture)} (${((Date.now() - started) / 1000).toFixed(1)}s)`));
-    if (capture.live.status === 'refused' || capture.live.status === 'failed') ctx.io.warn(`Live API check: ${capture.live.message}`);
+    if (capture.live.status === 'refused' || capture.live.status === 'failed' || capture.live.status === 'skipped') ctx.io.warn(`Live API check${capture.live.status === 'skipped' ? ' skipped' : ''}: ${capture.live.message}`);
     for (const w of capture.warnings.slice(0, 3)) ctx.io.warn(`API: ${w}`);
     return ref;
+  },
+
+  async saveBaseline(ref) {
+    return ref;
+  },
+
+  async restoreBaseline(kept, ctx) {
+    const c = await readApiCapture(ctx.root, kept as ApiRef);
+    return 'error' in c ? null : writeApiCapture(ctx.root, tagOf(ctx), c.capture);
   },
 
   async compare(beforeRef, afterRef, ctx): Promise<ProbeReport> {

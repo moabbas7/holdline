@@ -23,6 +23,7 @@ export interface ReportEntry {
   task: string | null;
   regressions: number | null;
   outside: number | null;
+  broken: number;
 }
 
 export interface ReportResult {
@@ -55,6 +56,7 @@ export async function listReports(root: string): Promise<ReportEntry[]> {
       task: side?.task ?? null,
       regressions: side?.counts?.regressions ?? null,
       outside: side?.counts?.['outside-scope'] ?? null,
+      broken: side?.counts?.['broken-by-task'] ?? 0,
     });
   }
   return out;
@@ -74,7 +76,7 @@ export async function reportCommand(cwd: string, opts: ReportOptions, io: Io): P
     if (!reports.length) io.log('No reports yet. `holdline after` writes one.');
     for (const r of reports) {
       const when = r.createdAt ? relativeTime(r.createdAt) : '';
-      const counts = r.regressions === null ? '' : `${r.regressions} regression${r.regressions === 1 ? '' : 's'}, ${r.outside} outside the task`;
+      const counts = r.regressions === null ? '' : `${r.regressions} regression${r.regressions === 1 ? '' : 's'}, ${r.outside} outside the task${r.broken ? `, ${r.broken} broken by the task's changes` : ''}`;
       io.log(`${String(r.n).padStart(3)}  ${rel(r.file)}  ${io.c.dim(when)}  ${r.task ? `"${r.task}"` : ''}  ${io.c.dim(counts)}`);
     }
     return { reports, opened: null };

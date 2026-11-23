@@ -119,6 +119,8 @@ export async function compareApi(b: ApiCapture, a: ApiCapture, ctx: CompareConte
   findings.sort((x, y) => rank(x.kind) - rank(y.kind));
   for (const w of a.warnings.slice(0, 5)) findings.push({ kind: 'info', title: w });
   if (a.live.status === 'refused' || a.live.status === 'failed') findings.push({ kind: 'info', title: `Live API check: ${a.live.message ?? a.live.status}` });
+  const liveSkipped = [b.live, a.live].find((l) => l.status === 'skipped');
+  if (liveSkipped) findings.push({ kind: 'info', title: `Live API check skipped: ${liveSkipped.message ?? 'the dev server stopped itself'}` });
 
   const regressions = findings.filter((f) => f.kind === 'regression').length;
   const changes = findings.filter((f) => f.kind === 'change').length;
@@ -133,6 +135,7 @@ export async function compareApi(b: ApiCapture, a: ApiCapture, ctx: CompareConte
     if (changes) parts.push(plural(changes, 'other API change'));
     summary = `${parts.join(', ')} (${plural(nRoutes, 'route')}, ${source})`;
   }
+  if (liveSkipped) summary += `; live check skipped: ${/^Next\.js stopped/.test(liveSkipped.message ?? '') ? 'Next.js stopped its dev server for the AI agent (see below)' : (liveSkipped.message ?? '')}`;
   return {
     probeId: 'api',
     title,

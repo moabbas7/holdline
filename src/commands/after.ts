@@ -19,6 +19,7 @@ import { buildReport, type ScopedReport } from '../report/model.js';
 import { printScopedReport } from '../report/terminal.js';
 import { classify } from '../scope/classify.js';
 import { matchTask, snapshotFiles } from '../scope/taskScope.js';
+import { keepBaseline } from './before.js';
 import { locked, preflightLargeFiles, short } from './common.js';
 
 export interface AfterOptions {
@@ -59,12 +60,14 @@ export async function afterCommand(cwd: string, opts: AfterOptions, io: Io): Pro
     const runStamp = stamp();
     const runDir = path.join(paths.runs, `${runStamp}-after`);
     const reports: ProbeReport[] = [];
+    const afterData: Record<string, unknown> = {};
     if (config.checks && Object.values(config.checks).some(Boolean)) io.log('Running checks:');
     const devServers = new DevServerPool();
     try {
       for (const probe of enabledProbes(config)) {
         const ctx: ProbeContext = { repo, root, config, snapshotSha: snap.sha, phase: 'after', runDir, io, devServers, ownOutputs };
-        const afterData = await probe.snapshot(ctx);
+        const data = await probe.snapshot(ctx);
+        afterData[probe.id] = data;
         if (!(probe.id in session.probes)) {
           reports.push({
             probeId: probe.id,
@@ -75,11 +78,14 @@ export async function afterCommand(cwd: string, opts: AfterOptions, io: Io): Pro
           });
           continue;
         }
-        reports.push(await probe.compare(session.probes[probe.id], afterData, ctx));
+        reports.push(await probe.compare(session.probes[probe.id], data, ctx));
       }
     } finally {
       await devServers.dispose();
     }
+
+    // These results are the baseline for the next task if nothing changes before it starts.
+    await keepBaseline(project, config, io, 'after', snap, afterData, 'after', 'after');
 
     const head = await headSha(repo);
     const headMoved = head !== session.snapshot.head ? { from: session.snapshot.head, to: head } : null;

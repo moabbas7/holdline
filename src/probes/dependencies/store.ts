@@ -9,7 +9,7 @@ export function depsPaths(root: string) {
   return {
     holdlineDir: dir,
     cache: path.join(dir, 'cache', 'deps-v1.json'),
-    graph: (phase: 'before' | 'after') => path.join(dir, 'deps', `graph-${phase}.json`),
+    graph: (phase: string) => path.join(dir, 'deps', `graph-${phase}.json`),
   };
 }
 
@@ -32,7 +32,7 @@ export async function writeCompactJson(file: string, value: unknown): Promise<st
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
 /** Save a graph to .holdline/deps/graph-<phase>.json and return the reference stored in the session. */
-export async function writeGraph(root: string, phase: 'before' | 'after', graph: DepGraph): Promise<DepGraphRef> {
+export async function writeGraph(root: string, phase: string, graph: DepGraph): Promise<DepGraphRef> {
   const file = depsPaths(root).graph(phase);
   const text = await writeCompactJson(file, graph);
   return { file: path.relative(root, file).split(path.sep).join('/'), sha256: sha256(text), stats: graph.stats };

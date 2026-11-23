@@ -22,6 +22,8 @@ holdline api                                    # every API route: methods, stat
 holdline visual [pages…]                        # load pages in Chromium: errors, failed requests, blank/error screens, screenshots
 holdline rollback                               # restore the working tree to the "before" snapshot
 holdline undo-rollback                          # changed your mind: restore the state from just before the rollback
+holdline install-hooks                          # run all of this automatically around Claude Code tasks (see below)
+holdline doctor                                 # check the setup and say what to fix
 ```
 
 Other commands:
@@ -30,13 +32,15 @@ Other commands:
 - `holdline unlock` removes a leftover lock file. Commands take `.holdline/lock` so only one runs at a time, and a lock from a dead process is cleared automatically. You only need `unlock` for a lock left on another machine (for example a shared folder).
 - `holdline after --all` also lists the changes inside the task area (collapsed to a count by default).
 - `holdline after --json` prints a machine-readable report with a documented, versioned schema: [docs/report-schema.md](docs/report-schema.md).
+- `holdline before --reuse-baseline` reuses the results of the last `after` when the working tree is exactly what that `after` checked, instead of running the checks again (what the Claude Code hooks do).
+- `holdline doctor` checks the config, the Claude Code hooks, git state, Playwright, database safety settings and the lock, and prints what to fix (exit 2 if something must be fixed).
 
 ### Exit codes
 
 | Code | Meaning |
 | --- | --- |
 | `0` | Success. For `after`: nothing went from passing to failing. |
-| `1` | `after` found at least one regression, in any scope (outside the task, expected ripple or inside it). |
+| `1` | `after` found at least one regression, in any scope (outside the task, broken by the task's changes, or inside it). |
 | `2` | holdline couldn't do what was asked: not a git repo, no config or session, a lock held by another command, an invalid argument. |
 | `3` | An unexpected internal error (a bug in holdline; the stack trace is printed). |
 | `130` | Cancelled at a prompt (Ctrl+C or answering no). Nothing was changed. |
@@ -46,7 +50,8 @@ Other commands:
 `holdline after` sorts every finding by how it relates to the task, and says why in one line (`why: …`):
 
 - **Outside the task**: things the task wasn't about. These come first, ranked: confirmed regressions (checks that went from passing to failing, broken imports), then database and API breaks, then visual problems, then changes.
-- **Expected ripple**: direct dependents of files changed for the task. For example, the files that import a shared helper the agent changed, the callers of an API route whose handler changed, or the code that uses a table a task migration altered. Re-exports are followed by name: when `timeAgo` in `packages/utils/src/functions/time-ago.ts` changes, the files that import `timeAgo` from `@dub/utils` (through its `index.ts` barrels) are ripple, and the files that import other helpers from the same package are not. Pages and layouts that render one of those files are ripple too.
+- **Broken by the task's changes**: regressions in direct dependents of what the task changed. For example, the task renamed an option of `timeAgo` and 7 callers still pass the old one, or a task migration dropped a column a route still reads. These are shown right after "Outside the task": the change may be intended, but the code that uses it is now broken.
+- **Expected ripple**: direct dependents of files changed for the task that changed without breaking. For example, the files that import a shared helper the agent changed, the callers of an API route whose handler changed, or the code that uses a table a task migration altered. Re-exports are followed by name: when `timeAgo` in `packages/utils/src/functions/time-ago.ts` changes, the files that import `timeAgo` from `@dub/utils` (through its `index.ts` barrels) are ripple, and the files that import other helpers from the same package are not. Pages and layouts that render one of those files are ripple too.
 - **In the task area**: collapsed to a count (`holdline after --all` lists them). A regression inside the task area is always shown.
 
 It ends with a summary of one to three lines and the exact rollback command, and writes an HTML report to `.holdline/reports/<timestamp>.html`. The HTML report is a single file with no scripts and no external resources, and screenshots and diffs are embedded, so it works offline and can be attached anywhere. `holdline report` opens the latest one, `holdline report --list` lists older ones and `holdline report <n>` opens one of them (`--no-open` only prints the path).
@@ -62,11 +67,64 @@ It ends with a summary of one to three lines and the exact rollback command, and
 
    Plurals are folded, and grammar words and generic words like "page" or "button" are ignored on their own. A word that matches more than 2% of the project's files (at least 12) is too generic to say where the task is and is ignored. `before` prints what matched (`Task scope: "users" → 4 files`).
 2. **`--scope "<glob>"`** (repeatable on `before`) adds files explicitly. A plain folder (`--scope lib`) covers everything under it.
-3. **The files the agent edited** join the task area when they match the task's terms, sit next to a task file in a small folder (10 source files or fewer), import or are imported by a task file, or are new helpers imported by such a file. An edit to an unrelated component in a large shared folder like `components/` stays **outside**. When nothing in the task text matches and there are no globs, the agent's edits are taken as the task area.
+3. **The files the agent edited** join the task area when they match the task's terms, sit next to a task file in a small folder (10 source files or fewer), import or are imported by a task file, or are new helpers imported by such a file. An edit to an unrelated component in a large shared folder like `components/` stays **outside**. An edited file that joined only because it imports a task file is a user of the task's code: if it breaks, the regression is **broken by the task's changes**, not "in the task area". When nothing in the task text matches and there are no globs, the agent's edits are taken as the task area.
 
-A finding is placed by what it is about: files, pages (through the Next.js page file and its layouts), API routes (through their handler) or tables. A regression is placed as far out as the code it breaks. For example, a dropped column of a task table that a file outside the task still reads is outside scope. A failing check is placed by the files its output names; when the output names no project file, it is shown outside scope so it is never hidden.
+A finding is placed by what it is about: files, pages (through the Next.js page file and its layouts), API routes (through their handler) or tables. A regression is placed as far out as the code it breaks. For example, a dropped column of a task table that a file outside the task still reads is outside scope, and one that only a direct user of the table still reads is broken by the task's changes. A failing check is placed by the files its output names; when the output names no project file, it is shown outside scope so it is never hidden.
 
 **Visual differences** on a page outside the task are reported as an **unexpected visual change**. They are still a change, not a regression, unless you set `"probes": { "visual": { "failOnUnexpectedChange": true } }`.
+
+## Running automatically with Claude Code
+
+```sh
+holdline install-hooks            # just for you: .claude/settings.local.json (git-ignored)
+holdline install-hooks --shared   # for the whole team: .claude/settings.json (commit it)
+holdline uninstall-hooks          # remove them again (--shared for the team file)
+```
+
+`install-hooks` runs `holdline init --yes` first if the project has no config. It merges holdline's entries into the settings file: your other settings and other tools' hooks are left exactly as they are, running it again changes nothing, and `uninstall-hooks` removes only holdline's entries. The hooks call the project's own holdline (`node_modules/.bin/holdline`) when it is installed there, otherwise `holdline` on your PATH; `--shared` requires one of the two so it works for teammates. Claude Code picks up the change by itself (check with `/hooks`).
+
+What happens then:
+
+- **When a session starts** (`SessionStart`), holdline records a baseline in the background (`holdline hook warm`): the same snapshot and checks as `before`, while you are still typing.
+- **When you send a prompt** (`UserPromptSubmit`), holdline starts a session with the prompt as the task. If the working tree is exactly the state the last `after` (or the background run) checked, it reuses those results instead of running the checks again, so this usually takes a second or two. Otherwise it runs the checks, for at most `hooks.promptBudgetSec` (180 s by default). It prints nothing into Claude's context.
+- **A follow-up prompt** while the last `after` still showed problems outside the task doesn't take a new snapshot (that would hide the earlier breaks). The prompt is added to the task text and the task scope instead, and the next `after` still compares against the original "before". The same happens when a turn was interrupted before `after` could run.
+- **When Claude finishes** (`Stop`), holdline runs `after`. If something outside the task, or something broken by the task's changes, went from working to broken, it sends Claude a short summary (what broke, where, why) and Claude carries on to fix it before handing back. Regressions inside the task area and plain changes never start a fix round. Afterwards you see one line: "nothing broken outside the task", "the regressions it found are fixed (1 automatic fix round)", or the problems still left.
+
+**Fix-round limit.** At most **2 automatic fix rounds** per prompt. After that, or as soon as a round changed nothing (Claude Code's `stop_hook_active` flag tells holdline it is already continuing because of a stop hook), holdline stops asking and shows you the report path and the rollback command instead. holdline never tells Claude to roll back: undoing the task is your decision.
+
+**What Claude is sent.** The summary is built from the JSON report. holdline's own wording (what broke, file and line, the round number) comes first. Everything taken from the project (check output, console errors, titles) follows in one marked block that says it is tool output to treat as data, not instructions. Each item there is cut to 200 characters, and ANSI codes, control characters, role markers and lines that look like instructions are removed. Project text could otherwise be used to steer Claude.
+
+**Fail open.** A hook never blocks or holds up the session when something goes wrong. In each of these cases the hook exits successfully with at most one line for you:
+
+- holdline is not configured;
+- the lock is held (for example you are running `holdline after` yourself);
+- a check takes longer than the budget (the checks are stopped);
+- holdline crashes, or the hook input can't be read.
+
+That turn is then simply not checked. Each hook's Claude Code `timeout` is set above holdline's own budget (`hooks.promptBudgetSec`, `hooks.stopBudgetSec`, 540 s by default; change them in `.holdline/config.json` and run `install-hooks` again). `HOLDLINE_HOOKS=off` turns the hooks off for one shell. What each hook did, and how long it took, is logged in `.holdline/hooks/log.jsonl`.
+
+**Several Claude sessions in one project.** One session is tracked at a time. While a session's turn is being tracked, prompts and stops from another session leave it alone: no snapshot, no change to the task, no `after`. Instead they show "holdline: already tracking another Claude session in this project". The turn can be taken over when its session ends (`SessionEnd`), or when it has not been touched for `hooks.staleTurnHours` (2 by default).
+
+**Next.js and agent detection.** Next.js 16.4+ stops `next dev` when it detects an AI agent (`CLAUDECODE`, `CURSOR_AGENT`, `CODEX_*`, …) and the project sets `experimental.agentUpgrade`. It shows an upgrade recommendation instead of starting. Run from a hook, holdline is inside the agent's environment, so the visual and live API checks are reported as **skipped**, with that reason. holdline doesn't hide the agent variables or retry around this. To run those checks, either:
+
+- upgrade Next.js;
+- remove `experimental.agentUpgrade` from next.config;
+- run `holdline before`/`after` from a terminal outside the agent.
+
+`holdline doctor` warns about this setting.
+
+### Other agents (Cursor, Codex, Aider, …)
+
+holdline works the same way by hand around any agent:
+
+```sh
+holdline before --task "add pagination to /users" --reuse-baseline
+# … let the agent work …
+holdline after --json > report.json || true
+jq -r '.findings[] | select(.kind == "regression" and (.scope == "outside-scope" or .scope == "broken-by-task")) | "\(.title) (\(.files | join(", "))): \(.reason)"' report.json
+```
+
+Feed those lines back to the agent, run `holdline after` again, and use `holdline rollback` if you want to undo the whole task. The exit code of `after` is 1 when anything regressed, so it also works in scripts and CI. If the agent has its own hook system, call `holdline before --yes --task "…"` when a task starts and `holdline after --json` when it ends.
 
 ## What a snapshot covers
 

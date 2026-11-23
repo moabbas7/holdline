@@ -1,14 +1,14 @@
 /**
  * The scoped `holdline after` report: findings classified against the task's scope,
  * grouped and ranked, plus a short plain-English summary. This object is also the
- * documented, versioned JSON output (docs/report-schema.md, schema/after-report.v1.json).
+ * documented, versioned JSON output (docs/report-schema.md, schema/after-report.v2.json).
  */
 import { createHash } from 'node:crypto';
 import type { ProbeReport } from '../probes/types.js';
 import { SCOPE_RANK, SEVERITY_RANK, type Classification, type ClassifiedFinding, type ScopeArea, type ScopeClass, type Severity } from '../scope/classify.js';
 
 export const REPORT_SCHEMA = 'holdline.after-report';
-export const REPORT_SCHEMA_VERSION = 1;
+export const REPORT_SCHEMA_VERSION = 2;
 export const ROLLBACK_COMMAND = 'holdline rollback';
 
 export interface ReportFinding {
@@ -123,6 +123,7 @@ export function buildReport(i: BuildReportInput): ScopedReport {
   const regressions = findings.filter((f) => f.kind === 'regression');
   const counts = {
     'outside-scope': main.filter((f) => f.scope === 'outside-scope').length,
+    'broken-by-task': main.filter((f) => f.scope === 'broken-by-task').length,
     'expected-ripple': main.filter((f) => f.scope === 'expected-ripple').length,
     'in-scope': main.filter((f) => f.scope === 'in-scope').length,
     regressions: regressions.length,
@@ -186,14 +187,20 @@ export function summarize(r: ScopedReport): string[] {
   const outReg = outside.filter((f) => f.kind === 'regression');
   const outChanges = outside.filter((f) => f.kind !== 'regression');
   const inReg = main.filter((f) => f.scope === 'in-scope' && f.kind === 'regression');
-  const rippleReg = main.filter((f) => f.scope === 'expected-ripple' && f.kind === 'regression');
+  const broken = main.filter((f) => f.scope === 'broken-by-task');
   const edited = r.scope.edited.inScope + r.scope.edited.ripple + r.scope.edited.outside;
   const lines: string[] = [];
 
-  if (outReg.length) {
-    const names = outReg.slice(0, 2).map(shortTitle);
-    const more = outReg.length > 2 ? ` and ${outReg.length - 2} more` : '';
-    lines.push(`The agent broke ${plural(outReg.length, 'thing')} outside the task: ${names.join('; ')}${more}.`);
+  const named = (list: ReportFinding[]) =>
+    `${list.slice(0, 2).map(shortTitle).join('; ')}${list.length > 2 ? ` and ${list.length - 2} more` : ''}`;
+  if (outReg.length) lines.push(`The agent broke ${plural(outReg.length, 'thing')} outside the task: ${named(outReg)}.`);
+  if (broken.length) {
+    const users = new Set(broken.flatMap((f) => [...(f.affects ?? []), ...f.lines.map((l) => l.file)]));
+    const where = users.size > 1 ? ` (${users.size} files affected)` : '';
+    lines.push(`The task's changes broke ${plural(broken.length, 'thing')} that use${broken.length === 1 ? 's' : ''} them: ${named(broken)}${where}.`);
+  }
+  if (outReg.length || broken.length) {
+    /* said above */
   } else if (outChanges.length) {
     const editedOutside = r.scope.edited.outside;
     lines.push(
@@ -204,11 +211,10 @@ export function summarize(r: ScopedReport): string[] {
   } else if (edited === 0) {
     lines.push('The agent changed no files, and nothing went from passing to failing.');
   } else {
-    lines.push(`Everything the agent changed stays within the task area${inReg.length || rippleReg.length ? '' : ', and nothing went from passing to failing'}.`);
+    lines.push(`Everything the agent changed stays within the task area${inReg.length ? '' : ', and nothing went from passing to failing'}.`);
   }
   const fixLines: string[] = [];
   if (inReg.length) fixLines.push(`${plural(inReg.length, 'regression')} inside the task area (${listOf(inReg.slice(0, 2).map(shortTitle))}${inReg.length > 2 ? ', …' : ''})`);
-  if (rippleReg.length) fixLines.push(`${plural(rippleReg.length, 'regression')} in code that uses what the task changed (${listOf(rippleReg.slice(0, 2).map(shortTitle))}${rippleReg.length > 2 ? ', …' : ''})`);
   if (fixLines.length) lines.push(`To fix: ${fixLines.join('; ')}.`);
   if (edited > 0) {
     const parts = [`${plural(r.scope.edited.inScope, 'file')} in the task area`];

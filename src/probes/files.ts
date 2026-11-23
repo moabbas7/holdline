@@ -26,6 +26,15 @@ export const filesProbe: Probe<FilesSnapshot> = {
     return { sha: ctx.snapshotSha };
   },
 
+  async saveBaseline() {
+    return {};
+  },
+
+  // The file list is the snapshot itself: point at the new "before" snapshot.
+  async restoreBaseline(_kept, ctx) {
+    return { sha: ctx.snapshotSha };
+  },
+
   async compare(before, after, ctx) {
     const own = ctx.ownOutputs;
     // Files written only by holdline's own build in `before` are not the agent's changes.

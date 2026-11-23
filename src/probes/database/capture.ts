@@ -22,10 +22,10 @@ export async function captureSchema(root: string, settings: DbSettings): Promise
 
 // --- Storage (.holdline/db/schema-<phase>.json) --------------------------------------
 
-export const dbCaptureFile = (root: string, phase: 'before' | 'after') => path.join(root, HOLDLINE_DIR, 'db', `schema-${phase}.json`);
+export const dbCaptureFile = (root: string, phase: string) => path.join(root, HOLDLINE_DIR, 'db', `schema-${phase}.json`);
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
-export async function writeCapture(root: string, phase: 'before' | 'after', capture: DbCapture): Promise<DbRef> {
+export async function writeCapture(root: string, phase: string, capture: DbCapture): Promise<DbRef> {
   const file = dbCaptureFile(root, phase);
   const text = await writeCompactJson(file, capture);
   return {

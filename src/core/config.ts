@@ -21,6 +21,8 @@ export interface Config {
   checks: Record<CheckName, CheckConfig | null>;
   /** Per-probe settings, keyed by probe id. `{ enabled: false }` turns a probe off. */
   probes?: Record<string, { enabled?: boolean; [key: string]: unknown }>;
+  /** Claude Code hook settings (see src/hooks/settings.ts). */
+  hooks?: Record<string, unknown>;
 }
 
 export const DEFAULT_TIMEOUTS: Record<CheckName, number> = {
@@ -66,6 +68,7 @@ export async function loadConfig(root: string): Promise<Config> {
         : DEFAULT_LARGE_UNTRACKED_MB,
     checks,
     ...(raw.probes ? { probes: raw.probes } : {}),
+    ...(raw.hooks && typeof raw.hooks === 'object' ? { hooks: raw.hooks } : {}),
   };
 }
 

@@ -10,6 +10,12 @@ export interface ProbeContext {
   /** The snapshot taken for this phase ("before" or "after"). */
   snapshotSha: string;
   phase: 'before' | 'after';
+  /**
+   * Name used for the files this run writes (graph-<tag>.json, visual/<tag>/…). Defaults to
+   * `phase`. The background baseline run (`holdline hook warm`) captures with phase "before"
+   * but tag "warm", so it never overwrites the files an open session points at.
+   */
+  tag?: BaselineTag;
   /** Per-run directory under .holdline/runs/ for logs and artefacts. */
   runDir: string;
   io: Io;
@@ -25,6 +31,10 @@ export interface ProbeContext {
    */
   ownOutputs?: { excluded: Set<string>; edited: Set<string> };
 }
+
+export type BaselineTag = 'before' | 'after' | 'warm';
+/** The file tag of a probe run. */
+export const tagOf = (ctx: { phase: 'before' | 'after'; tag?: BaselineTag }): BaselineTag => ctx.tag ?? ctx.phase;
 
 export type FindingKind = 'regression' | 'fixed' | 'still-failing' | 'change' | 'info';
 
@@ -97,4 +107,15 @@ export interface Probe<S = unknown> {
    * a rollback does NOT restore (e.g. a live database). Receives this probe's "before" data.
    */
   rollbackWarnings?(before: S, ctx: RollbackContext): Promise<string[]>;
+  /**
+   * Optional: whether this capture can be reused as a later "before" baseline when the
+   * working tree is unchanged (src/core/baseline.ts). Return the data to keep, or null when
+   * it can't be reused. Probes without it are always re-run.
+   */
+  saveBaseline?(data: S, ctx: ProbeContext): Promise<unknown | null>;
+  /**
+   * Optional: turn kept data into this probe's "before" data for a new session (ctx is the
+   * new "before" run: its snapshotSha and phase). Return null to re-run the probe instead.
+   */
+  restoreBaseline?(kept: unknown, ctx: ProbeContext): Promise<S | null>;
 }
