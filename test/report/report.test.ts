@@ -145,13 +145,13 @@ describe('the CLI: after --json, exit codes and holdline report', () => {
   let out: string;
   beforeAll(() => {
     // Not a tmpDir(): those are removed after each test, and the build is shared.
-    out = mkdtempSync(path.join(realpathSync(tmpdir()), 'holdline-cli-'));
+    out = mkdtempSync(path.join(realpathSync.native(tmpdir()), 'holdline-cli-'));
     execFileSync(process.execPath, [path.join(REPO, 'node_modules/typescript/bin/tsc'), '-p', path.join(REPO, 'tsconfig.json'), '--outDir', path.join(out, 'dist')], { stdio: 'pipe' });
     cpSync(path.join(REPO, 'package.json'), path.join(out, 'package.json'));
-    symlinkSync(path.join(REPO, 'node_modules'), path.join(out, 'node_modules'));
+    symlinkSync(path.join(REPO, 'node_modules'), path.join(out, 'node_modules'), 'junction');
     cli = path.join(out, 'dist/cli.js');
   }, 120_000);
-  afterAll(() => rmSync(out, { recursive: true, force: true }));
+  afterAll(() => rmSync(out, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
 
   const run = (cwd: string, ...args: string[]) => spawnSync(process.execPath, [cli, ...args], { cwd, encoding: 'utf8', env: { ...process.env, HOLDLINE_NO_OPEN: '1', NO_COLOR: '1' } });
 

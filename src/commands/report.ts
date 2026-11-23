@@ -7,6 +7,7 @@ import { readJson } from '../core/store.js';
 import type { Io } from '../io.js';
 import type { ScopedReport } from '../report/model.js';
 import { openProject, relativeTime } from './common.js';
+import { posix } from '../core/paths.js';
 
 export interface ReportOptions {
   list?: boolean;
@@ -71,7 +72,7 @@ function opener(): [string, string[]] {
 export async function reportCommand(cwd: string, opts: ReportOptions, io: Io): Promise<ReportResult> {
   const { root } = await openProject(cwd);
   const reports = await listReports(root);
-  const rel = (f: string) => path.relative(cwd, f) || f;
+  const rel = (f: string) => posix(path.relative(cwd, f)) || f;
   if (opts.list) {
     if (!reports.length) io.log('No reports yet. `holdline after` writes one.');
     for (const r of reports) {
@@ -94,7 +95,7 @@ export async function reportCommand(cwd: string, opts: ReportOptions, io: Io): P
   if (!noOpen) {
     const [cmd, args] = opener();
     try {
-      const child = spawn(cmd, [...args, pick.file], { stdio: 'ignore', detached: true });
+      const child = spawn(cmd, [...args, pick.file], { stdio: 'ignore', detached: true, windowsHide: true });
       child.on('error', () => io.warn(`Could not open a browser; open ${rel(pick.file)} yourself.`));
       child.unref();
     } catch {

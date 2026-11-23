@@ -49,6 +49,7 @@ export function git(args: string[], opts: GitOptions): Promise<string> {
       cwd: opts.cwd,
       env: gitEnv(opts.env),
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
     });
     const out: Buffer[] = [];
     const err: Buffer[] = [];

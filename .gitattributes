@@ -1,0 +1,8 @@
+# Check out text files with LF on every platform (Windows runners default to CRLF).
+# Fixtures, snapshots and parsers then see the same bytes everywhere.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.tgz binary

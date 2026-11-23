@@ -453,11 +453,14 @@ export class ScopeModel {
   filesInText(text: string): { file: string; line?: number }[] {
     const out: { file: string; line?: number }[] = [];
     const seen = new Set<string>();
-    const root = this.input.root ? this.input.root.split(path.sep).join('/') + '/' : null;
-    const re = /([\w@.~\-[\]()+/\\]+\.[A-Za-z]{1,6})(?:[:(](\d+))?/g;
+    // Windows paths are case-insensitive and drive letters come in either case (C: / c:).
+    const fold = (s: string) => (process.platform === 'win32' ? s.toLowerCase() : s);
+    const root = this.input.root ? fold(this.input.root.split(path.sep).join('/') + '/') : null;
+    // An optional drive letter (`C:\proj\src\a.ts`) only when it starts a word and a separator follows.
+    const re = /((?:(?<!\w)[A-Za-z]:(?=[\\/]))?[\w@.~\-[\]()+/\\]+\.[A-Za-z]{1,6})(?:[:(](\d+))?/g;
     for (const m of text.matchAll(re)) {
       let p = m[1]!.replace(/\\/g, '/');
-      if (root && p.startsWith(root)) p = p.slice(root.length);
+      if (root && fold(p).startsWith(root)) p = p.slice(root.length);
       p = p.replace(/^\.\//, '');
       if (!this.files.has(p)) {
         // Tools often print paths relative to a package folder (monorepos): try a suffix match.

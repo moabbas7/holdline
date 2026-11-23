@@ -1,7 +1,9 @@
+import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { findConnectionString, parseDotenv } from '../../src/probes/database/live/env.js';
 import { redact, safeError } from '../../src/probes/database/live/redact.js';
 import { isLocalHost, parseConnectionString } from '../../src/probes/database/live/target.js';
+import { WINDOWS } from '../helpers/platform.js';
 import { cleanupAll, makeRepo } from '../helpers/tmpRepo.js';
 
 afterEach(cleanupAll);
@@ -55,8 +57,14 @@ describe('connection strings', () => {
   });
 
   it('resolves Prisma SQLite file: URLs against the schema.prisma folder', () => {
-    expect(parseConnectionString('file:./dev.db', { root: '/p', prismaDir: '/p/prisma' })).toMatchObject({ ok: true, target: { dialect: 'sqlite', file: '/p/prisma/dev.db' } });
-    expect(parseConnectionString('sqlite:data/app.sqlite', { root: '/p' })).toMatchObject({ ok: true, target: { file: '/p/data/app.sqlite' } });
+    expect(parseConnectionString('file:./dev.db', { root: '/p', prismaDir: '/p/prisma' })).toMatchObject({ ok: true, target: { dialect: 'sqlite', file: path.resolve('/p/prisma/dev.db') } });
+    expect(parseConnectionString('sqlite:data/app.sqlite', { root: '/p' })).toMatchObject({ ok: true, target: { file: path.resolve('/p/data/app.sqlite') } });
+    expect(parseConnectionString('file:///srv/data/app.sqlite', { root: '/p' })).toMatchObject({ ok: true, target: { file: path.resolve('/srv/data/app.sqlite') } });
+  });
+
+  // file:///C:/… is an absolute Windows path, not /C:/… under the current drive.
+  it.runIf(WINDOWS)('reads file:///C:/… as a Windows drive path (Windows only)', () => {
+    expect(parseConnectionString('file:///C:/data/app.sqlite', { root: 'D:\\p' })).toMatchObject({ ok: true, target: { file: 'C:\\data\\app.sqlite' } });
   });
 });
 

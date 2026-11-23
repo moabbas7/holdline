@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { createWriteStream } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
+import { killProcessTree } from './processTree.js';
 
 export interface RunResult {
   exitCode: number | null;
@@ -19,14 +20,7 @@ const active = new Set<ChildProcess>();
 
 function killTree(child: ChildProcess, signal: NodeJS.Signals): void {
   if (child.pid === undefined) return;
-  try {
-    // Detached children lead their own process group: kill the whole group so
-    // grandchildren (npm → node → jest workers) don't linger.
-    if (process.platform !== 'win32') process.kill(-child.pid, signal);
-    else child.kill(signal);
-  } catch {
-    /* already exited */
-  }
+  killProcessTree(child.pid, signal);
 }
 
 process.on('exit', () => killAllChecks());
@@ -55,6 +49,7 @@ export async function runCommand(
       shell: true,
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: process.platform !== 'win32',
+      windowsHide: true,
       env: { ...process.env, CI: 'true', FORCE_COLOR: '0', NO_COLOR: '1' },
     });
     active.add(child);

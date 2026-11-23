@@ -16,6 +16,7 @@ import type { Io } from '../io.js';
 import { openProject } from './common.js';
 import { initCommand } from './init.js';
 import { loadConfig } from '../core/config.js';
+import { posix } from '../core/paths.js';
 
 export const HOOK_EVENT_NAMES = ['SessionStart', 'UserPromptSubmit', 'Stop', 'SessionEnd'] as const;
 export type ClaudeHookEvent = (typeof HOOK_EVENT_NAMES)[number];
@@ -214,7 +215,7 @@ export async function installHooksCommand(cwd: string, opts: InstallOptions, io:
   const resolved = opts.command ? { base: opts.command, how: 'the given command' } : resolveHookCommand(root, !!opts.shared);
   const next = addHoldline(settings, holdlineGroups(resolved.base, hookTimeouts(hookSettings(config))));
   const out = serialise(next);
-  const rel = path.relative(root, file);
+  const rel = posix(path.relative(root, file));
   const changed = out !== text;
   if (changed) await writeJson(file, next);
   if (!opts.shared) await ignoreLocalSettings(root, io);
@@ -231,7 +232,7 @@ export async function installHooksCommand(cwd: string, opts: InstallOptions, io:
   if (existsSync(other)) {
     const o = await readSettings(other).catch(() => null);
     if (o && removeHoldline(o.settings).removed > 0) {
-      io.warn(`holdline's hooks are also in ${path.relative(root, other)}; Claude Code would run both. Remove one with \`holdline uninstall-hooks${opts.shared ? '' : ' --shared'}\`.`);
+      io.warn(`holdline's hooks are also in ${posix(path.relative(root, other))}; Claude Code would run both. Remove one with \`holdline uninstall-hooks${opts.shared ? '' : ' --shared'}\`.`);
     }
   }
   return { file, changed, command: resolved.base, ranInit };
@@ -240,7 +241,7 @@ export async function installHooksCommand(cwd: string, opts: InstallOptions, io:
 export async function uninstallHooksCommand(cwd: string, opts: { shared?: boolean }, io: Io): Promise<{ file: string; removed: number }> {
   const { root } = await openProject(cwd);
   const file = settingsPath(root, !!opts.shared);
-  const rel = path.relative(root, file);
+  const rel = posix(path.relative(root, file));
   if (!existsSync(file)) {
     io.log(`No ${rel}: nothing to remove.`);
     return { file, removed: 0 };
@@ -256,7 +257,7 @@ export async function uninstallHooksCommand(cwd: string, opts: { shared?: boolea
   const other = settingsPath(root, !opts.shared);
   if (existsSync(other)) {
     const o = await readSettings(other).catch(() => null);
-    if (o && removeHoldline(o.settings).removed > 0) io.log(io.c.dim(`holdline's hooks are still in ${path.relative(root, other)} (remove them with \`holdline uninstall-hooks${opts.shared ? '' : ' --shared'}\`).`));
+    if (o && removeHoldline(o.settings).removed > 0) io.log(io.c.dim(`holdline's hooks are still in ${posix(path.relative(root, other))} (remove them with \`holdline uninstall-hooks${opts.shared ? '' : ' --shared'}\`).`));
   }
   return { file, removed };
 }

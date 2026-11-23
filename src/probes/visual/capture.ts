@@ -409,7 +409,7 @@ export type StorageStateCheck = { ok: true; path?: string } | { ok: false; messa
  */
 export async function checkStorageState(root: string, configured: string | undefined): Promise<StorageStateCheck> {
   if (!configured) return { ok: true };
-  const expanded = configured.startsWith('~/') ? path.join(os.homedir(), configured.slice(2)) : configured;
+  const expanded = /^~[\\/]/.test(configured) ? path.join(os.homedir(), configured.slice(2)) : configured;
   const abs = path.resolve(root, expanded);
   if (!existsSync(abs)) return { ok: false, message: `the storage-state file ${configured} (probes.visual.storageState) does not exist. Create it with Playwright (for example \`npx playwright codegen --save-storage=<file> <url>\`).` };
   const rel = path.relative(root, abs);

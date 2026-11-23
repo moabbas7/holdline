@@ -7,12 +7,13 @@
  * startup timeouts and Ctrl+C. A DevServerPool starts each server once per run, so several
  * probes in one `before`/`after` share it.
  */
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { createWriteStream, mkdirSync, type WriteStream } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
 import type { PackageManager } from '../core/config.js';
+import { killProcessTree } from '../core/processTree.js';
 import { DEFAULT_ENV_VARS, ENV_FILES, parseDotenv } from './database/live/env.js';
 import { isLocalHost, parseConnectionString } from './database/live/target.js';
 
@@ -139,12 +140,7 @@ let exitHook = false;
 
 function killGroupSync(child: ChildProcess, signal: NodeJS.Signals): void {
   if (child.pid === undefined) return;
-  try {
-    if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
-    else process.kill(-child.pid, signal);
-  } catch {
-    /* already gone */
-  }
+  killProcessTree(child.pid, signal);
 }
 
 function groupAlive(pid: number): boolean {
@@ -278,6 +274,7 @@ export async function startDevServer(opts: StartOptions): Promise<StartResult> {
     cwd: opts.root,
     shell: true,
     detached: process.platform !== 'win32',
+    windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...env, PORT: String(port), BROWSER: 'none', FORCE_COLOR: '0' },
   });

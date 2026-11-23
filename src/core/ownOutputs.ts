@@ -7,7 +7,6 @@
  * nothing the user sees changes) and every path that differs from the snapshot is recorded
  * with its blob. In `after`, a path whose blob still matches was written by holdline only.
  */
-import path from 'node:path';
 import { git, splitNul, type RepoInfo } from './git.js';
 import { withTempIndex } from './snapshot.js';
 import { HOLDLINE_DIR } from './store.js';
@@ -101,4 +100,3 @@ export async function topLevelNames(repo: RepoInfo, sha: string): Promise<Set<st
   return new Set(splitNul(await git(['ls-tree', '-z', '--name-only', sha], { cwd: repo.root })));
 }
 
-export const posix = (p: string) => p.split(path.sep).join('/');

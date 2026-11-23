@@ -1,11 +1,12 @@
-import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { NOT_CONFIGURED } from '../../src/hooks/handlers.js';
 import { buildCli } from '../helpers/cli.js';
 import { cleanupAll, makeRepo, tmpDir } from '../helpers/tmpRepo.js';
 import { breakBilling, hook, hookRepo, input, out, prompt, state, stop } from './helpers.js';
+import { alive } from '../helpers/platform.js';
 
 afterEach(() => cleanupAll());
 
@@ -80,16 +81,21 @@ describe('fail open', { timeout: 120_000 }, () => {
   });
 
   it('out of time: the checks are stopped, the prompt goes ahead with one line, and the turn is not checked', async () => {
-    const t = await hookRepo({ checks: { build: { command: 'sleep 30', timeoutSec: 60 }, typecheck: null, lint: null, test: null } });
+    // A portable `sleep 30` that records its pid, so the test can check it was killed.
+    const sleeper = `"${process.execPath}" -e "require('fs').writeFileSync('sleeper.pid', String(process.pid)); setTimeout(() => {}, 30000)"`;
+    const t = await hookRepo({ checks: { build: { command: sleeper, timeoutSec: 60 }, typecheck: null, lint: null, test: null } });
     const started = Date.now();
     const r = await prompt(t, 'add pagination to the users list', {}, { budgetMs: 1500 });
     expect(Date.now() - started).toBeLessThan(6000);
     expectAtMostOneLine(r.stdout);
     expect(String(out(r).systemMessage)).toMatch(/^holdline: recording the baseline took longer than 2s, so this task isn't checked \(raise hooks\.promptBudgetSec/);
     expect(state(t).turn!.status).toBe('skipped');
-    // The `sleep` was killed.
-    const ps = spawnSync('pgrep', ['-f', 'sleep 30'], { encoding: 'utf8' });
-    expect(ps.stdout.trim()).toBe('');
+    // The sleeper (if it got as far as starting) was killed.
+    if (existsSync(t.p('sleeper.pid'))) {
+      const pid = Number(readFileSync(t.p('sleeper.pid'), 'utf8'));
+      for (let i = 0; i < 40 && alive(pid); i++) await new Promise((r) => setTimeout(r, 50));
+      expect(alive(pid)).toBe(false);
+    }
   });
 
   it('HOLDLINE_HOOKS=off turns every hook into a no-op', async () => {

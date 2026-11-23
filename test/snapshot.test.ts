@@ -3,6 +3,7 @@ import { getRepo } from '../src/core/git.js';
 import { createSnapshot, diffSnapshots, readSnapshot, refName } from '../src/core/snapshot.js';
 import { ensureGitignore } from '../src/core/store.js';
 import { cleanupAll, makeRepo, type TestRepo } from './helpers/tmpRepo.js';
+import { WINDOWS } from './helpers/platform.js';
 
 afterEach(cleanupAll);
 
@@ -114,12 +115,20 @@ describe('createSnapshot', () => {
     expect(Object.keys(treeFiles(t, snap.sha)).some((n) => n.startsWith('.holdline'))).toBe(false);
   });
 
-  it('records file modes and symlinks', async () => {
+  // Windows has no executable bit (git sets core.filemode=false there).
+  it.skipIf(WINDOWS)('records file modes (skipped on Windows: no executable bit)', async () => {
     const t = makeRepo();
-    t.write('run.sh', '#!/bin/sh\n').chmod('run.sh', 0o755).symlink('README.md', 'link.md');
+    t.write('run.sh', '#!/bin/sh\n').chmod('run.sh', 0o755);
     const snap = await createSnapshot(await getRepo(t.dir), 'before');
     const tree = t.git('ls-tree', '-r', `${snap.sha}^{tree}`);
     expect(tree).toMatch(/^100755 blob \w+\trun\.sh$/m);
+  });
+
+  it('records symlinks', async () => {
+    const t = makeRepo();
+    t.symlink('README.md', 'link.md');
+    const snap = await createSnapshot(await getRepo(t.dir), 'before');
+    const tree = t.git('ls-tree', '-r', `${snap.sha}^{tree}`);
     expect(tree).toMatch(/^120000 blob \w+\tlink\.md$/m);
   });
 });

@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { renameSync } from 'node:fs';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { HoldlineError } from './errors.js';
@@ -40,7 +41,40 @@ export async function writeJson(file: string, value: unknown): Promise<void> {
   await mkdir(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
   await writeFile(tmp, JSON.stringify(value, null, 2) + '\n');
-  await rename(tmp, file);
+  await renameRetrying(tmp, file);
+}
+
+// On Windows, replacing a file fails for a moment while another process (antivirus, the
+// search indexer, a holdline process reading it) has it open. Retry those errors briefly.
+const RENAME_RETRY_CODES = new Set(['EPERM', 'EACCES', 'EBUSY']);
+const RENAME_DELAYS_MS = [10, 25, 50, 100, 200, 400];
+const retryable = (e: unknown) => process.platform === 'win32' && RENAME_RETRY_CODES.has((e as NodeJS.ErrnoException).code ?? '');
+
+/** `rename`, retried on Windows' transient sharing errors. */
+export async function renameRetrying(from: string, to: string): Promise<void> {
+  for (let i = 0; ; i++) {
+    try {
+      return await rename(from, to);
+    } catch (e) {
+      if (i >= RENAME_DELAYS_MS.length || !retryable(e)) throw e;
+      await new Promise((r) => setTimeout(r, RENAME_DELAYS_MS[i]));
+    }
+  }
+}
+
+/** `renameSync`, retried on Windows' transient sharing errors (busy-waits; only for exit paths). */
+export function renameRetryingSync(from: string, to: string): void {
+  for (let i = 0; ; i++) {
+    try {
+      return renameSync(from, to);
+    } catch (e) {
+      if (i >= RENAME_DELAYS_MS.length || !retryable(e)) throw e;
+      const until = Date.now() + RENAME_DELAYS_MS[i]!;
+      while (Date.now() < until) {
+        /* wait */
+      }
+    }
+  }
 }
 
 /** Sortable, filesystem-safe timestamp, e.g. 20261122T214300123Z. */

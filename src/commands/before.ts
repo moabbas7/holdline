@@ -16,6 +16,7 @@ import { readGraph } from '../probes/dependencies/store.js';
 import type { DepGraph, DepGraphRef } from '../probes/dependencies/types.js';
 import { matchTask, snapshotFiles, type TaskScope } from '../scope/taskScope.js';
 import { locked, preflightLargeFiles, short, type Project } from './common.js';
+import { posix } from '../core/paths.js';
 
 /** One line: what the task text and globs matched. */
 export function describeScope(scope: TaskScope): string {
@@ -206,7 +207,7 @@ export async function beforeCommand(cwd: string, opts: BeforeOptions, io: Io): P
         ref: refName(repo, 'before'),
         historyRef: snap.historyRef,
       },
-      runDir: path.relative(root, runDir),
+      runDir: posix(path.relative(root, runDir)),
       probes: results,
       scope,
       ...(ownCount > 0 ? { ownOutputs } : {}),

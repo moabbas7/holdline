@@ -49,6 +49,8 @@ export function parseConnectionString(raw: string, opts: { root: string; prismaD
 
   if (scheme === 'file' || scheme === 'sqlite' || scheme === 'sqlite3') {
     let p = value.replace(/^[a-z0-9]+:(\/\/)?/i, '').split('?')[0]!;
+    // file:///C:/db.sqlite → C:/db.sqlite (not /C:/…, which resolves to C:\C:\… on Windows).
+    if (/^\/[A-Za-z]:[\\/]/.test(p)) p = p.slice(1);
     if (p === ':memory:' || p === '') return { ok: false, reason: 'an in-memory SQLite database has no schema to read', secrets };
     // Prisma resolves relative SQLite paths against the schema.prisma folder.
     const base = scheme === 'file' && opts.prismaDir ? opts.prismaDir : opts.root;

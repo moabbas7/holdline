@@ -2,6 +2,7 @@ import path from 'node:path';
 import { CHECK_NAMES, type CheckName } from '../core/config.js';
 import { runCommand } from '../core/runner.js';
 import type { Finding, Probe, ProbeReport } from './types.js';
+import { posix } from '../core/paths.js';
 
 export interface CheckResult {
   command: string;
@@ -58,7 +59,7 @@ export const checksProbe: Probe<ChecksSnapshot> = {
         timedOut: r.timedOut,
         durationMs: r.durationMs,
         outputTail: r.outputTail,
-        logFile: path.relative(ctx.root, logFile),
+        logFile: posix(path.relative(ctx.root, logFile)),
       };
       const status = passed ? ctx.io.c.green('pass') : ctx.io.c.red(r.timedOut ? 'timeout' : 'fail');
       ctx.io.progressDone(`  ${name.padEnd(9)} ${status} ${ctx.io.c.dim(`(${secs(r.durationMs)})`)}`);

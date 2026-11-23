@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { DepGraph } from '../../src/probes/dependencies/types.js';
 import type { ProbeReport } from '../../src/probes/types.js';
-import { classify, severityOf } from '../../src/scope/classify.js';
+import { classify, ScopeModel, severityOf } from '../../src/scope/classify.js';
+import { WINDOWS } from '../helpers/platform.js';
 import { matchTask, matchesScopeGlob } from '../../src/scope/taskScope.js';
 import { extractTerms, singular, subwords } from '../../src/scope/terms.js';
 
@@ -126,5 +127,27 @@ describe('classify', () => {
     expect(severityOf('visual', 'regression')).toBe('medium');
     expect(severityOf('visual', 'change')).toBe('low');
     expect(severityOf('files', 'info')).toBe('info');
+  });
+});
+
+describe('project files named in check output', () => {
+  const files = ['src/a.ts', 'lib/db.ts'];
+  const model = (root: string) =>
+    new ScopeModel({ scope: matchTask('anything', [], { files, graph: null }), beforeFiles: files, afterFiles: files, beforeGraph: null, afterGraph: null, edited: [], reports: [], root });
+
+  it('finds relative paths after a word and a colon (no drive letter is taken from "error:")', () => {
+    expect(model('/proj').filesInText('error:src/a.ts(3,4): bad\nlib\\db.ts:7 also')).toEqual([
+      { file: 'src/a.ts', line: 3 },
+      { file: 'lib/db.ts', line: 7 },
+    ]);
+  });
+
+  it('finds absolute POSIX paths under the root', () => {
+    expect(model('/proj').filesInText('/proj/src/a.ts:12:1 error')).toEqual([{ file: 'src/a.ts', line: 12 }]);
+  });
+
+  // Only Windows roots have drive letters (and compare case-insensitively).
+  it.runIf(WINDOWS)('finds absolute Windows paths with a drive letter, in any case (Windows only)', () => {
+    expect(model('C:\\Users\\me\\proj').filesInText('c:\\users\\me\\proj\\src\\a.ts:5:2 error')).toEqual([{ file: 'src/a.ts', line: 5 }]);
   });
 });

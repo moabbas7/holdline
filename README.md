@@ -1,12 +1,23 @@
 # holdline
 
+[![CI](https://github.com/moabbas7/holdline/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/moabbas7/holdline/actions/workflows/ci.yml)
+
 A local CLI that catches what AI coding agents break outside the task they were given, and puts everything back when they do.
 
 - **Local only.** No cloud services and no accounts. Data lives in `.holdline/` in your project (git-ignored) and in git refs under `refs/holdline/`.
 - **Never touches your branch, index or stash list** when it takes a snapshot.
 - **Rollback can be undone.** The current state is always snapshotted first.
 
-Requires Node ≥ 20.17 and git.
+Requires Node ≥ 22.12 and git. CI runs the test suite on Linux, macOS and Windows.
+
+## Install
+
+holdline is installed straight from GitHub (it isn't on npm). It builds itself on install.
+
+```sh
+npx github:moabbas7/holdline init                 # try it without installing
+npm install -D github:moabbas7/holdline           # or add it to the project (then `npx holdline …`)
+```
 
 ## Usage
 

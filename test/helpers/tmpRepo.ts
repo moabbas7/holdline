@@ -26,8 +26,10 @@ export function cleanupAll(): void {
 }
 
 export function tmpDir(prefix = 'holdline-test-'): string {
-  const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), prefix)));
-  cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+  // .native expands Windows 8.3 short names (C:\Users\RUNNER~1), like holdline's own realpath.
+  const dir = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), prefix)));
+  // Windows refuses to delete files a just-killed process still holds for a moment: retry.
+  cleanups.push(() => rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
   return dir;
 }
 

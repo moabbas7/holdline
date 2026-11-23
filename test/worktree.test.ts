@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readdirSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { beforeCommand } from '../src/commands/before.js';
@@ -9,6 +9,7 @@ import { getRepo } from '../src/core/git.js';
 import { readSession } from '../src/core/session.js';
 import { createSnapshot, refName, withTempIndex } from '../src/core/snapshot.js';
 import { cleanupAll, fakeIo, makeRepo, tmpDir, TestRepo, writeConfig } from './helpers/tmpRepo.js';
+import { WINDOWS } from './helpers/platform.js';
 
 afterEach(cleanupAll);
 
@@ -30,7 +31,8 @@ describe('git worktrees', () => {
     const repo = await getRepo(wt.dir);
     expect(repo.isLinkedWorktree).toBe(true);
     expect(repo.worktreeId).toMatch(/^wt-[0-9a-f]{12}$/);
-    expect(repo.gitDir).toBe(wt.gitDir());
+    // git prints C:/…/.git/worktrees/x on Windows; holdline keeps the native realpath.
+    expect(repo.gitDir).toBe(realpathSync.native(wt.gitDir()));
     expect(repo.gitDir.startsWith(path.join(main.gitDir(), 'worktrees'))).toBe(true);
     expect((await getRepo(main.dir)).worktreeId).toBe('main');
   });
@@ -68,7 +70,8 @@ describe('git worktrees', () => {
     expect(tempIndexFiles(repo.gitDir)).toEqual([]);
   });
 
-  it('leaves no temp index behind when a snapshot fails', async () => {
+  // chmod 000 makes a file unreadable only on POSIX; on Windows it just sets the read-only flag.
+  it.skipIf(WINDOWS)('leaves no temp index behind when a snapshot fails (skipped on Windows: chmod cannot make a file unreadable)', async () => {
     const t = makeRepo();
     t.write('secret.txt', 'x').chmod('secret.txt', 0o000); // unreadable → git add fails
     const repo = await getRepo(t.dir);

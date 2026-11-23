@@ -2,9 +2,9 @@
  * What the hooks remember between events: the turn currently being tracked (one per
  * project), which Claude session it belongs to, and how many fix rounds it used.
  */
-import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { readJson, storePaths, writeJson } from '../core/store.js';
+import { readJson, renameRetryingSync, storePaths, writeJson } from '../core/store.js';
 
 export type TurnStatus = 'starting' | 'ready' | 'skipped' | 'ended';
 
@@ -50,7 +50,7 @@ export function writeStateSync(root: string, s: HookState): void {
   mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.sync.tmp`;
   writeFileSync(tmp, JSON.stringify(s, null, 2) + '\n');
-  renameSync(tmp, file);
+  renameRetryingSync(tmp, file);
 }
 
 /**

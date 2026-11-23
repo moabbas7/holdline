@@ -18,6 +18,7 @@ import { agentVarsIn, databaseSafety } from '../probes/devServer.js';
 import { visualSettingsFrom } from '../probes/visual/index.js';
 import { relativeTime } from './common.js';
 import { HOOK_EVENT_NAMES, isHoldlineHandler, onPath, readSettings, settingsPath, type CommandHandler } from './hooks.js';
+import { posix } from '../core/paths.js';
 
 export type Level = 'ok' | 'warn' | 'error' | 'info';
 export interface DoctorItem {
@@ -148,7 +149,7 @@ async function hookChecks(root: string, config: Config | null, env: NodeJS.Proce
   const found: { file: string; events: Map<string, CommandHandler[]> }[] = [];
   for (const shared of [false, true]) {
     const file = settingsPath(root, shared);
-    const rel = path.relative(root, file);
+    const rel = posix(path.relative(root, file));
     if (!existsSync(file)) continue;
     let settings: Awaited<ReturnType<typeof readSettings>>['settings'];
     try {

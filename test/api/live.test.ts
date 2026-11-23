@@ -14,6 +14,7 @@ import { beforeCommand } from '../../src/commands/before.js';
 import { databaseSafety, redactPath, runLive } from '../../src/probes/api/live.js';
 import { apiSettings, type LiveSettings } from '../../src/probes/api/types.js';
 import { cleanupAll, fakeIo, makeRepo, tmpDir, writeConfig, type TestRepo } from '../helpers/tmpRepo.js';
+import { WINDOWS } from '../helpers/platform.js';
 
 afterEach(cleanupAll);
 
@@ -238,14 +239,16 @@ describe('live mode', () => {
   });
 });
 
-describe('live mode: Ctrl+C', () => {
+// Windows can't send Ctrl+C (SIGINT) to a child process: `kill('SIGINT')` there is TerminateProcess,
+// so holdline's handler never runs. The tree kill itself is covered by the other live tests.
+describe.skipIf(WINDOWS)('live mode: Ctrl+C (skipped on Windows: no SIGINT for child processes)', () => {
   let cli: string;
   beforeAll(() => {
     // Build holdline into a temp dir so it can run as a real CLI process.
     const out = tmpDir('holdline-cli-');
     execFileSync(process.execPath, [path.join(REPO, 'node_modules/typescript/bin/tsc'), '-p', path.join(REPO, 'tsconfig.json'), '--outDir', path.join(out, 'dist')], { stdio: 'pipe' });
     cpSync(path.join(REPO, 'package.json'), path.join(out, 'package.json'));
-    symlinkSync(path.join(REPO, 'node_modules'), path.join(out, 'node_modules'));
+    symlinkSync(path.join(REPO, 'node_modules'), path.join(out, 'node_modules'), 'junction');
     cli = path.join(out, 'dist/cli.js');
   }, 120_000);
 

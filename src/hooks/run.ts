@@ -86,6 +86,7 @@ export function spawnWarmProcess(root: string, sessionId: string): void {
   const child = spawn(process.execPath, [cli, 'hook', 'warm', '--root', root, '--session', sessionId], {
     cwd: root,
     detached: true,
+    windowsHide: true,
     stdio: ['ignore', out, out],
     env: process.env,
   });

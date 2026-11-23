@@ -12,6 +12,7 @@ import {
   type RepoInfo,
 } from './git.js';
 import { HOLDLINE_DIR, stamp, storePaths } from './store.js';
+import { posix } from './paths.js';
 
 /**
  * Snapshots are ordinary git commits that are reachable only from refs under
@@ -376,7 +377,7 @@ export async function restoreTree(
     const to = path.join(displaceDir, rel);
     await mkdir(path.dirname(to), { recursive: true });
     await rename(path.join(root, rel), to);
-    result.displaced.push({ from: rel, to: path.relative(root, to) });
+    result.displaced.push({ from: rel, to: posix(path.relative(root, to)) });
   };
 
   // 1. Delete files that exist now but not in the target.
