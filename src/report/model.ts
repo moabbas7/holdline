@@ -6,6 +6,7 @@
 import { createHash } from 'node:crypto';
 import type { ProbeReport } from '../probes/types.js';
 import { SCOPE_RANK, SEVERITY_RANK, type Classification, type ClassifiedFinding, type ScopeArea, type ScopeClass, type Severity } from '../scope/classify.js';
+import { agree, plural } from '../plural.js';
 
 export const REPORT_SCHEMA = 'holdline.after-report';
 export const REPORT_SCHEMA_VERSION = 2;
@@ -153,8 +154,6 @@ export function buildReport(i: BuildReportInput): ScopedReport {
   return report;
 }
 
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-
 /** Cut at a word boundary. */
 function clip(t: string, max = 60): string {
   if (t.length <= max) return t;
@@ -196,8 +195,8 @@ export function summarize(r: ScopedReport): string[] {
   if (outReg.length) lines.push(`The agent broke ${plural(outReg.length, 'thing')} outside the task: ${named(outReg)}.`);
   if (broken.length) {
     const users = new Set(broken.flatMap((f) => [...(f.affects ?? []), ...f.lines.map((l) => l.file)]));
-    const where = users.size > 1 ? ` (${users.size} files affected)` : '';
-    lines.push(`The task's changes broke ${plural(broken.length, 'thing')} that use${broken.length === 1 ? 's' : ''} them: ${named(broken)}${where}.`);
+    const where = users.size > 1 ? ` (${plural(users.size, 'file')} affected)` : '';
+    lines.push(`The task's changes broke ${plural(broken.length, 'thing')} that ${agree(broken.length, 'uses', 'use')} them: ${named(broken)}${where}.`);
   }
   if (outReg.length || broken.length) {
     /* said above */
@@ -206,7 +205,7 @@ export function summarize(r: ScopedReport): string[] {
     lines.push(
       editedOutside
         ? `Nothing broke, but the agent edited ${plural(editedOutside, 'file')} outside the task area (${plural(outChanges.length, 'change')} to review below).`
-        : `Nothing broke, but ${plural(outChanges.length, 'change')} landed outside the task area; review them below.`,
+        : `Nothing broke, but ${plural(outChanges.length, 'change')} landed outside the task area; review ${agree(outChanges.length, 'it', 'them')} below.`,
     );
   } else if (edited === 0) {
     lines.push('The agent changed no files, and nothing went from passing to failing.');

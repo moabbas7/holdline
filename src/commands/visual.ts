@@ -4,6 +4,7 @@ import type { Io } from '../io.js';
 import { isPageTemplate, normalisePagePath, resolvePageTemplate, type VisualCapture } from '../probes/visual/types.js';
 import { describeVisualCapture, runVisual, visualSettingsFrom, writeVisualCapture } from '../probes/visual/index.js';
 import { openProject } from './common.js';
+import { plural } from '../plural.js';
 
 export interface VisualOptions {
   json?: boolean;
@@ -77,7 +78,7 @@ function printVisual(c: VisualCapture, io: Io): void {
     for (const m of r.consoleErrors) io.log(`  ${col.yellow('console error')}: ${m}`);
     for (const m of r.pageErrors) io.log(`  ${col.yellow('uncaught error')}: ${m}`);
     for (const f of r.failedRequests) io.log(`  ${col.yellow('failed request')}: ${f.method} ${f.path} → ${f.status ?? f.failure}`);
-    if (r.noisy?.length) io.log(col.dim(`  ${r.noisy.length} region(s) changed between two screenshots (live content); ignored when comparing`));
+    if (r.noisy?.length) io.log(col.dim(`  ${plural(r.noisy.length, 'region')} changed between two screenshots (live content); ignored when comparing`));
     if (r.screenshot) io.log(col.dim(`  screenshot: ${r.screenshot.file}`));
   }
 }

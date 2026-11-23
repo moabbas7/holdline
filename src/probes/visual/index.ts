@@ -13,6 +13,7 @@ import { writeCompactJson } from '../dependencies/store.js';
 import { DevServerPool } from '../devServer.js';
 import { tagOf, type BaselineTag, type Probe, type ProbeReport } from '../types.js';
 import { VISUAL_CAPTURE_VERSION, visualSettings, type PageResult, type VisualCapture, type VisualRef, type VisualSettings } from './types.js';
+import { plural } from '../../plural.js';
 
 export function visualSettingsFrom(config: Config | null): VisualSettings {
   const live = (config?.probes?.api as { live?: Record<string, unknown> } | undefined)?.live;
@@ -149,7 +150,7 @@ export function describeVisualCapture(c: VisualCapture): string {
   if (c.status !== 'ok') return c.status;
   const pages = new Set(c.results.map((r) => r.page)).size;
   const problems = c.results.filter((r) => !r.load.ok || r.blank || r.errorScreen || r.consoleErrors.length || r.pageErrors.length || r.failedRequests.length).length;
-  return `${pages} page${pages === 1 ? '' : 's'} × 2 viewports${problems ? `, ${problems} with problems` : ''}`;
+  return `${plural(pages, 'page')} × 2 viewports${problems ? `, ${problems} with problems` : ''}`;
 }
 
 // --- Probe ---------------------------------------------------------------------------------------

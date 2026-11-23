@@ -10,6 +10,7 @@ import type { Finding, ProbeReport } from '../types.js';
 import { knownKeys, pageSlug, signalKeys } from './capture.js';
 import { decodePng, diffImages, encodePng } from './image.js';
 import { type FlakySignals, type PageResult, type VisualCapture } from './types.js';
+import { plural } from '../../plural.js';
 
 export interface CompareOptions {
   root: string;
@@ -28,8 +29,6 @@ interface Raw {
   lines?: string[];
   images?: { before: string; after: string; diff: string };
 }
-
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 function describeKey(key: string, r: PageResult): string {
   if (key === 'load') return r.load.status ? `returns HTTP ${r.load.status}` : `does not load (${r.load.error ?? 'error'})`;

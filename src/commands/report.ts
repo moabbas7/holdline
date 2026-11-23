@@ -8,6 +8,7 @@ import type { Io } from '../io.js';
 import type { ScopedReport } from '../report/model.js';
 import { openProject, relativeTime } from './common.js';
 import { posix } from '../core/paths.js';
+import { plural } from '../plural.js';
 
 export interface ReportOptions {
   list?: boolean;
@@ -77,7 +78,7 @@ export async function reportCommand(cwd: string, opts: ReportOptions, io: Io): P
     if (!reports.length) io.log('No reports yet. `holdline after` writes one.');
     for (const r of reports) {
       const when = r.createdAt ? relativeTime(r.createdAt) : '';
-      const counts = r.regressions === null ? '' : `${r.regressions} regression${r.regressions === 1 ? '' : 's'}, ${r.outside} outside the task${r.broken ? `, ${r.broken} broken by the task's changes` : ''}`;
+      const counts = r.regressions === null ? '' : `${plural(r.regressions, 'regression')}, ${r.outside} outside the task${r.broken ? `, ${r.broken} broken by the task's changes` : ''}`;
       io.log(`${String(r.n).padStart(3)}  ${rel(r.file)}  ${io.c.dim(when)}  ${r.task ? `"${r.task}"` : ''}  ${io.c.dim(counts)}`);
     }
     return { reports, opened: null };

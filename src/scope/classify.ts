@@ -18,6 +18,7 @@ import { indexGraph, dependentsOf, type GraphIndex } from '../probes/dependencie
 import { matchRoute } from '../probes/dependencies/routes.js';
 import type { DepGraph } from '../probes/dependencies/types.js';
 import type { Finding, FindingMeta, ProbeReport } from '../probes/types.js';
+import { agree, plural } from '../plural.js';
 import { matchesScopeGlob, pageFiles, segmentWords, termMatchesFile, toPattern, type TaskScope } from './taskScope.js';
 
 export type ScopeClass = 'in-scope' | 'expected-ripple' | 'broken-by-task' | 'outside-scope';
@@ -508,7 +509,7 @@ function classifyOne(model: ScopeModel, rep: ProbeReport, f: Finding, input: Cla
     // A failing check is about every file it names: the one furthest from the task decides.
     const worst = [...files].map((file) => ({ file, w: model.fileWhy(file) })).sort((a, b) => SCOPE_RANK[b.w.scope] - SCOPE_RANK[a.w.scope] || a.file.localeCompare(b.file))[0];
     level = worst
-      ? { scope: worst.w.scope, reason: `${files.size > 1 ? `errors are in ${files.size} files, including ${worst.file}` : `the error is in ${worst.file}`}, which ${worst.w.why}` }
+      ? { scope: worst.w.scope, reason: `${files.size > 1 ? `errors are in ${plural(files.size, 'file')}, including ${worst.file}` : `the error is in ${worst.file}`}, which ${worst.w.why}` }
       : null;
   } else {
     const levels: Level[] = [];
@@ -534,13 +535,7 @@ function classifyOne(model: ScopeModel, rep: ProbeReport, f: Finding, input: Cla
     if (model.changedForTask.has(subject)) {
       const users = model.usersOf(subject).filter((u) => !u.barrel).length;
       const all = meta.affects.length;
-      level = {
-        scope: 'expected-ripple',
-        reason:
-          users === all
-            ? `${all} file${all === 1 ? '' : 's'} use ${subject}, which the agent changed for the task`
-            : `${users} file${users === 1 ? '' : 's'} use ${subject} (${all} depend on it in all), which the agent changed for the task`,
-      };
+      level = { scope: 'expected-ripple', reason: rippleReason(subject, users, all) };
     }
   }
 
@@ -553,7 +548,7 @@ function classifyOne(model: ScopeModel, rep: ProbeReport, f: Finding, input: Cla
     const top = worst[0];
     if (top) {
       const same = worst.filter((x) => x.l.scope === top.l.scope).length;
-      const more = same > 1 ? ` (and ${same - 1} more file${same > 2 ? 's' : ''})` : '';
+      const more = same > 1 ? ` (and ${plural(same - 1, 'more file')})` : '';
       level =
         top.l.scope === 'outside-scope'
           ? { scope: 'outside-scope', reason: `${level.reason}, but ${top.u}${more} outside the task still uses it` }
@@ -601,4 +596,12 @@ function classifyOne(model: ScopeModel, rep: ProbeReport, f: Finding, input: Cla
     locations,
     meta,
   };
+}
+
+/** Why a dependency summary is the task's ripple: "1 file uses lib/a.ts", "3 files use lib/a.ts (5 depend on it in all)". */
+export function rippleReason(subject: string, users: number, all: number): string {
+  const using = `${plural(users, 'file')} ${agree(users, 'uses', 'use')} ${subject}`;
+  return users === all
+    ? `${using}, which the agent changed for the task`
+    : `${using} (${all} ${agree(all, 'depends', 'depend')} on it in all), which the agent changed for the task`;
 }

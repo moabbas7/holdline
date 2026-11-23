@@ -1,15 +1,14 @@
 import { tagOf, type Finding, type Probe, type ProbeReport } from '../types.js';
-import { brokenKey, brokenTitle, describeDependents, summarizeDependents } from './format.js';
+import { brokenKey, brokenTitle, dependentsTitle, describeDependents } from './format.js';
 import { buildGraph, dependentsOf, indexGraph, rememberGraph, type GraphIndex } from './graph.js';
 import { readGraph, writeGraph } from './store.js';
 import type { BrokenImport, DepGraph, DepGraphRef } from './types.js';
+import { agree, plural } from '../../plural.js';
 
 const MAX_BLAST_FINDINGS = 30;
 
 /** The importing file is the subject; the import's target (when resolved) is what it points at. */
 const brokenMeta = (br: BrokenImport) => ({ files: [br.file], locations: [{ file: br.file, line: br.line }] });
-
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 export const dependenciesProbe: Probe<DepGraphRef> = {
   id: 'dependencies',
@@ -107,7 +106,7 @@ export function compareGraphs(before: DepGraph, after: DepGraph, title = 'Depend
     for (const d of deps) reached.add(d.node);
     blast.push({
       kind: 'change',
-      title: `${c.path} (${c.status}) → ${summarizeDependents(graph, deps)} depend on it`,
+      title: dependentsTitle(graph, c.path, c.status, deps),
       path: c.path,
       lines: describeDependents(graph, deps),
       meta: { files: [c.path], affects: deps.filter((d) => graph.files[d.node]).map((d) => d.node) },
@@ -117,14 +116,14 @@ export function compareGraphs(before: DepGraph, after: DepGraph, title = 'Depend
   if (blast.length > MAX_BLAST_FINDINGS) {
     findings.push({
       kind: 'info',
-      title: `…and ${blast.length - MAX_BLAST_FINDINGS} more changed files with dependents (run \`holdline graph <file>\` for any of them)`,
+      title: `…and ${plural(blast.length - MAX_BLAST_FINDINGS, 'more changed file')} with dependents (run \`holdline graph <file>\` for any of them)`,
     });
   }
 
   const parts: string[] = [];
   if (changed.length === 0) parts.push('no source files changed');
-  else if (blast.length === 0) parts.push(`${plural(changed.length, 'changed file')}, nothing else depends on them`);
-  else parts.push(`${plural(changed.length, 'changed file')} affect ${plural(reached.size, 'dependent')} (files, pages, API routes, tables)`);
+  else if (blast.length === 0) parts.push(`${plural(changed.length, 'changed file')}, nothing else depends on ${agree(changed.length, 'it', 'them')}`);
+  else parts.push(`${plural(changed.length, 'changed file')} ${agree(changed.length, 'affects', 'affect')} ${plural(reached.size, 'dependent')} (files, pages, API routes, tables)`);
   if (newBroken > 0) parts.push(`${plural(newBroken, 'new broken import')}`);
 
   return {

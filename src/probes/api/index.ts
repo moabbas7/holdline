@@ -11,8 +11,7 @@ import { compareApi } from './diff.js';
 import type { DevServerPool } from '../devServer.js';
 import { runLive } from './live.js';
 import { API_CAPTURE_VERSION, apiSettings, type ApiCapture, type ApiRef, type ApiSettings, type LiveCapture } from './types.js';
-
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+import { plural } from '../../plural.js';
 
 export function apiSettingsFrom(config: Config | null): ApiSettings {
   return apiSettings(config?.probes?.api as Record<string, unknown> | undefined);

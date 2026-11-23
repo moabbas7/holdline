@@ -3,6 +3,7 @@ import { relativeTime, short } from '../commands/common.js';
 import type { Io } from '../io.js';
 import type { ScopeClass } from '../scope/classify.js';
 import { isFooter, type ReportFinding, type ScopedReport } from './model.js';
+import { agree, plural } from '../plural.js';
 
 export interface PrintOptions {
   /** Expand the in-scope group and show notes in the footer. */
@@ -23,13 +24,13 @@ export function scopeLine(r: ScopedReport): string {
   const parts: string[] = [];
   for (const t of s.terms.slice(0, 6)) {
     const bits: string[] = [];
-    if (t.files) bits.push(`${t.files} file${t.files === 1 ? '' : 's'}`);
+    if (t.files) bits.push(plural(t.files, 'file'));
     if (t.routes.length) bits.push(t.routes.join(', '));
     if (t.tables.length) bits.push(`table ${t.tables.join(', ')}`);
     parts.push(`"${t.text}" (${bits.join(', ')})`);
   }
   if (s.terms.length > 6) parts.push(`…${s.terms.length - 6} more`);
-  for (const g of s.globs) parts.push(`--scope ${g.glob} (${g.files} file${g.files === 1 ? '' : 's'})`);
+  for (const g of s.globs) parts.push(`--scope ${g.glob} (${plural(g.files, 'file')})`);
   if (s.fallback) return "the task text matched nothing in the project; the agent's edits are taken as the task area";
   return parts.join(', ');
 }
@@ -42,7 +43,7 @@ function printFinding(f: ReportFinding, io: Io): void {
   if (f.kind === 'regression' && f.detail) for (const l of indent(f.detail, 15)) io.log(io.c.dim(l));
   const notes = f.notes;
   for (const line of notes.slice(0, MAX_NOTES)) io.log(io.c.dim(`      ${line}`));
-  if (notes.length > MAX_NOTES) io.log(io.c.dim(`      …and ${notes.length - MAX_NOTES} more lines (see the HTML report)`));
+  if (notes.length > MAX_NOTES) io.log(io.c.dim(`      …and ${plural(notes.length - MAX_NOTES, 'more line')} (see the HTML report)`));
 }
 
 const HEADINGS: Record<ScopeClass, string> = {
@@ -87,11 +88,11 @@ export function printScopedReport(r: ScopedReport, io: Io, opts: PrintOptions = 
         for (const f of group) printFinding(f, io);
       } else {
         if (regs.length) {
-          io.log(io.c.bold(`${HEADINGS[scope]}: ${regs.length} regression${regs.length === 1 ? '' : 's'}`));
+          io.log(io.c.bold(`${HEADINGS[scope]}: ${plural(regs.length, 'regression')}`));
           for (const f of regs) printFinding(f, io);
         }
         if (rest.length) {
-          io.log(`${io.c.bold(regs.length ? '  and' : HEADINGS[scope] + ':')} ${rest.length} change${rest.length === 1 ? '' : 's'} ${io.c.dim('(holdline after --all to list them)')}`);
+          io.log(`${io.c.bold(regs.length ? '  and' : HEADINGS[scope] + ':')} ${plural(rest.length, 'change')} ${io.c.dim('(holdline after --all to list them)')}`);
         }
       }
       continue;
@@ -116,14 +117,14 @@ export function printScopedReport(r: ScopedReport, io: Io, opts: PrintOptions = 
     if (!opts.all && shown.length > MAX_FOOTER) io.log(io.c.dim(`  …and ${shown.length - MAX_FOOTER} more`));
   }
   const notes = footer.length - shown.length;
-  if (notes > 0) io.log(io.c.dim(`  ${notes} note${notes === 1 ? '' : 's'} (holdline after --all, or the HTML report)`));
+  if (notes > 0) io.log(io.c.dim(`  ${plural(notes, 'note')} (holdline after --all, or the HTML report)`));
 
   if (r.ownOutputs.excluded.length) {
     io.log();
     const n = r.ownOutputs.excluded.length;
     io.log(
       io.c.yellow(
-        `${n} file${n === 1 ? ' was' : 's were'} written by your own checks during \`holdline before\` (build output that isn't git-ignored), so ${n === 1 ? 'it was' : 'they were'} not counted as agent changes.`,
+        `${plural(n, 'file')} ${agree(n, 'was', 'were')} written by your own checks during \`holdline before\` (build output that isn't git-ignored), so ${agree(n, 'it was', 'they were')} not counted as agent changes.`,
       ),
     );
     io.log(`  Add to .gitignore: ${r.ownOutputs.gitignoreSuggestion.map((l) => io.c.bold(l)).join('  ')}`);

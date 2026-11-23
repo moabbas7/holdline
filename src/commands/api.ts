@@ -5,6 +5,7 @@ import { captureApi } from '../probes/api/index.js';
 import { shapeText } from '../probes/api/shape.js';
 import type { ApiCapture, MethodApi, RouteApi } from '../probes/api/types.js';
 import { openProject } from './common.js';
+import { plural } from '../plural.js';
 
 export interface ApiOptions {
   json?: boolean;
@@ -52,12 +53,12 @@ function printApi(r: ApiResult, opts: ApiOptions, io: Io): void {
     const s = r.stats;
     io.log(
       c.dim(
-        `${s.routes} route${s.routes === 1 ? '' : 's'}${s.unknown ? `, ${s.unknown} not analysable` : ''} ` +
+        `${plural(s.routes, 'route')}${s.unknown ? `, ${s.unknown} not analysable` : ''} ` +
           `(static analysis${s.mode === 'syntax' ? ' from object literals only' : ''}, ${(s.ms / 1000).toFixed(1)}s${s.cached ? `, ${s.cached} cached` : ''})`,
       ),
     );
     for (const route of r.routes.slice(0, MAX_ROUTES)) printRoute(route, io);
-    if (r.routes.length > MAX_ROUTES) io.log(c.dim(`\n…and ${r.routes.length - MAX_ROUTES} more routes (use --json for all)`));
+    if (r.routes.length > MAX_ROUTES) io.log(c.dim(`\n…and ${plural(r.routes.length - MAX_ROUTES, 'more route')} (use --json for all)`));
   }
   if (r.live.status === 'ok') {
     io.log();

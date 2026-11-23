@@ -22,6 +22,7 @@ import type { ScopedReport } from '../report/model.js';
 import { buildFeedback, unresolvedOf } from './feedback.js';
 import { MAX_FIX_ROUNDS, type HookSettings } from './settings.js';
 import { otherActiveTurn, readState, writeState, writeStateSync, type HookState, type Turn } from './state.js';
+import { plural } from '../plural.js';
 
 /** The JSON Claude Code sends on stdin (the fields holdline uses). */
 export interface HookInput {
@@ -205,8 +206,6 @@ export async function promptHook(input: HookInput, ctx: HookContext): Promise<Ho
 }
 
 // --- Stop ------------------------------------------------------------------------------------
-
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 export async function stopHook(input: HookInput, ctx: HookContext): Promise<HookResult> {
   if (!ctx.config) return { outcome: 'not-configured' };

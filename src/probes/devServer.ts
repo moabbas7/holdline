@@ -17,6 +17,7 @@ import { killProcessTree } from '../core/processTree.js';
 import { assertStarting } from '../core/stop.js';
 import { DEFAULT_ENV_VARS, ENV_FILES, parseDotenv } from './database/live/env.js';
 import { isLocalHost, parseConnectionString } from './database/live/target.js';
+import { agree } from '../plural.js';
 
 const SUPABASE_VARS = ['SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_URL'];
 const KILL_GRACE_MS = 3000;
@@ -64,7 +65,7 @@ export function nextAgentStopMessage(output: string, env: NodeJS.ProcessEnv): st
     (/includes Future Defaults/.test(clean) ? 'Next.js recommends adopting its Future Defaults.' : null);
   const vars = agentVarsIn(env);
   return (
-    `Next.js stopped \`next dev\` before it started: it detected an AI agent${vars.length ? ` (${vars.join(', ')} ${vars.length === 1 ? 'is' : 'are'} set)` : ''} ` +
+    `Next.js stopped \`next dev\` before it started: it detected an AI agent${vars.length ? ` (${vars.join(', ')} ${agree(vars.length, 'is', 'are')} set)` : ''} ` +
     `and the project sets experimental.agentUpgrade, so it shows an upgrade recommendation instead${summary ? ` ("${summary}")` : ''}. ` +
     'holdline does not hide agent variables or retry around this, so this check was skipped. To run it: upgrade Next.js (npx next upgrade), ' +
     'remove experimental.agentUpgrade from next.config, or run `holdline before`/`holdline after` from a terminal outside the agent.'

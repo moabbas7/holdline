@@ -1,5 +1,6 @@
 import { diffSnapshots } from '../core/snapshot.js';
 import type { Probe } from './types.js';
+import { plural } from '../plural.js';
 
 export interface FilesSnapshot {
   sha: string;
@@ -46,7 +47,7 @@ export const filesProbe: Probe<FilesSnapshot> = {
       summary:
         changes.length === 0
           ? 'no files changed'
-          : `${changes.length} file${changes.length > 1 ? 's' : ''} changed`,
+          : `${plural(changes.length, 'file')} changed`,
       findings: changes.map((c) => ({
         kind: 'change' as const,
         title: c.oldPath ? `${c.status} ${c.oldPath} → ${c.path}` : `${c.status} ${c.path}`,

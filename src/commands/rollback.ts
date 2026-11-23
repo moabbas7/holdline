@@ -8,6 +8,7 @@ import { enabledProbes } from '../probes/registry.js';
 import type { RollbackContext } from '../probes/types.js';
 import { describePlan, locked, preflightLargeFiles, requireConfirmation, short } from './common.js';
 import { requireSession } from './after.js';
+import { plural } from '../plural.js';
 
 export interface RollbackOptions {
   yes?: boolean;
@@ -17,7 +18,7 @@ export function reportOutcome(outcome: SafeRestoreOutcome, io: Io): void {
   const { result, headMoved } = outcome;
   io.log(
     io.c.green(
-      `Restored ${result.written.length} file(s), deleted ${result.deleted.length}` +
+      `Restored ${plural(result.written.length, 'file')}, deleted ${result.deleted.length}` +
         (result.indexRestored ? ', reset the staging area' : '') +
         '.',
     ),

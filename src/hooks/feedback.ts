@@ -15,6 +15,7 @@
  */
 import type { ReportFinding, ScopedReport } from '../report/model.js';
 import { MAX_FIX_ROUNDS } from './settings.js';
+import { agree, plural } from '../plural.js';
 
 export const DATA_OPEN = '<<<holdline-data';
 export const DATA_CLOSE = 'holdline-data>>>';
@@ -117,9 +118,9 @@ function where(f: ReportFinding): string {
   const shown = locs.slice(0, 3);
   const hidden = new Set([...f.lines.map((l) => l.file), ...f.files, ...(f.affects ?? [])]);
   for (const s of shown) hidden.delete(s.replace(/:\d+$/, ''));
-  const more = hidden.size ? `, +${hidden.size} more file${hidden.size === 1 ? '' : 's'}` : '';
+  const more = hidden.size ? `, +${plural(hidden.size, 'more file')}` : '';
   if (shown.length) return ` in ${shown.join(', ')}${more}`;
-  return hidden.size ? ` in ${hidden.size} file${hidden.size === 1 ? '' : 's'} (named in the data block)` : '';
+  return hidden.size ? ` in ${plural(hidden.size, 'file')} (named in the data block)` : '';
 }
 
 /** The first lines of check output that say what failed (error-looking lines, else the last one). */
@@ -150,7 +151,7 @@ export function buildFeedback({ report, round, maxRounds = MAX_FIX_ROUNDS }: Fee
   const data: string[] = [];
   const n = items.length;
   instructions.push(
-    `holdline checked the project after your changes: ${n} thing${n === 1 ? '' : 's'} that worked before this task ${n === 1 ? 'is' : 'are'} broken now.`,
+    `holdline checked the project after your changes: ${plural(n, 'thing')} that worked before this task ${agree(n, 'is', 'are')} broken now.`,
   );
   shown.forEach((f, i) => {
     const k = i + 1;

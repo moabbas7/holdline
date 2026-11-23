@@ -11,8 +11,8 @@ import type { Finding, FindingMeta, ProbeReport } from '../types.js';
 import { fieldRefs } from './fieldRefs.js';
 import { diffShapes, pathText, shapeText, type ShapeChange } from './shape.js';
 import type { ApiCapture, LiveRequestResult, MethodApi, RouteApi, Shape, Status } from './types.js';
+import { plural } from '../../plural.js';
 
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const MAX_CALL_LINES = 8;
 const MAX_FIELD_LINES = 8;
 const is2xx = (s: Status) => typeof s === 'number' && s >= 200 && s < 300;
@@ -331,7 +331,7 @@ function callerLines(graph: DepGraph, idx: GraphIndex, calls: ApiCall[]): string
     const role = graph.files[c.file]?.role === 'page' ? 'page ' : '';
     lines.push(`${role}${c.file}:${c.line} calls ${c.method ? c.method + ' ' : ''}${c.url}`);
   }
-  if (sorted.length > MAX_CALL_LINES) lines.push(`…and ${sorted.length - MAX_CALL_LINES} more calls`);
+  if (sorted.length > MAX_CALL_LINES) lines.push(`…and ${plural(sorted.length - MAX_CALL_LINES, 'more call')}`);
   const direct = new Set(calls.map((c) => c.file));
   const pages = new Set<string>();
   for (const f of direct) {

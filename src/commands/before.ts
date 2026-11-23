@@ -17,11 +17,12 @@ import type { DepGraph, DepGraphRef } from '../probes/dependencies/types.js';
 import { matchTask, snapshotFiles, type TaskScope } from '../scope/taskScope.js';
 import { locked, preflightLargeFiles, short, type Project } from './common.js';
 import { posix } from '../core/paths.js';
+import { plural } from '../plural.js';
 
 /** One line: what the task text and globs matched. */
 export function describeScope(scope: TaskScope): string {
   const hits = scope.terms.filter((t) => !t.dropped && (t.files.length || t.routes.length || t.tables.length));
-  const parts = hits.slice(0, 6).map((t) => `"${t.text}" → ${t.files.length} file${t.files.length === 1 ? '' : 's'}`);
+  const parts = hits.slice(0, 6).map((t) => `"${t.text}" → ${plural(t.files.length, 'file')}`);
   if (hits.length > 6) parts.push(`…${hits.length - 6} more`);
   for (const g of scope.globs) parts.push(`--scope ${g}`);
   const dropped = scope.terms.filter((t) => t.dropped).map((t) => `"${t.text}"`);
@@ -181,7 +182,7 @@ export async function beforeCommand(cwd: string, opts: BeforeOptions, io: Io): P
     if (ownCount > 0) {
       const tops = await topLevelNames(repo, snap.sha);
       io.warn(
-        `Your checks wrote ${ownCount} file${ownCount === 1 ? '' : 's'} that git doesn't ignore (build output?). ` +
+        `Your checks wrote ${plural(ownCount, 'file')} that git doesn't ignore (build output?). ` +
           `They won't be counted as the agent's changes unless the agent edits them. Consider adding to .gitignore: ${gitignoreSuggestion(Object.keys(ownOutputs), tops).join(' ')}`,
       );
     }
@@ -216,7 +217,7 @@ export async function beforeCommand(cwd: string, opts: BeforeOptions, io: Io): P
 
     const pruned = await pruneHistory(repo, DEFAULT_KEEP);
     if (pruned.deleted.length > 0) {
-      io.log(io.c.dim(`Pruned ${pruned.deleted.length} old snapshot(s); keeping the newest ${DEFAULT_KEEP}.`));
+      io.log(io.c.dim(`Pruned ${plural(pruned.deleted.length, 'old snapshot')}; keeping the newest ${DEFAULT_KEEP}.`));
     }
 
     io.log();

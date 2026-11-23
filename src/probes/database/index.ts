@@ -6,9 +6,9 @@ import { captureLive } from './live/index.js';
 import { describeTarget } from './live/target.js';
 import { bareName, emptySchema, type DbCapture, type DbRef, type DbSchema } from './types.js';
 import { UsageIndex } from './usage.js';
+import { plural } from '../../plural.js';
 
 const MAX_LIST = 15;
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 export const NOT_ROLLED_BACK =
   'Files will be restored, but the database is NOT rolled back. Re-run your migrations or restore the database yourself.';
@@ -164,7 +164,7 @@ export async function compareCaptures(b: DbCapture, a: DbCapture, opts: CompareO
           const refs = await usage.columnRefs(u.directFiles, beforeSchema, c.table, c.column!);
           meta.locations = refs.map((r) => ({ file: r.file, line: r.line, text: r.text }));
           for (const r of refs.slice(0, 10)) lines.push(`✗ ${r.file}:${r.line} still references ${c.column} (${r.text})`);
-          if (refs.length > 10) lines.push(`…and ${refs.length - 10} more references`);
+          if (refs.length > 10) lines.push(`…and ${plural(refs.length - 10, 'more reference')}`);
         }
         if (describedTables.has(c.table)) lines.push(`used by ${u.summary} (listed above)`);
         else {
@@ -198,7 +198,7 @@ export async function compareCaptures(b: DbCapture, a: DbCapture, opts: CompareO
       const table = /^[^:]+:([^.]+\.[^.]+)/.exec(d.key)?.[1];
       findings.push({ kind: 'change', title: `Drift: ${d.text}`, ...(table ? { meta: { tables: [bareName(table)] } } : {}) });
     }
-    if (fresh.length > MAX_LIST) findings.push({ kind: 'info', title: `…and ${fresh.length - MAX_LIST} more differences between the database and the schema files` });
+    if (fresh.length > MAX_LIST) findings.push({ kind: 'info', title: `…and ${plural(fresh.length - MAX_LIST, 'more difference')} between the database and the schema files` });
     if (old.length) {
       notes.push({
         kind: 'info',

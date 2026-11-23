@@ -17,6 +17,7 @@ import { openProject } from './common.js';
 import { initCommand } from './init.js';
 import { loadConfig } from '../core/config.js';
 import { posix } from '../core/paths.js';
+import { plural } from '../plural.js';
 
 export const HOOK_EVENT_NAMES = ['SessionStart', 'UserPromptSubmit', 'Stop', 'SessionEnd'] as const;
 export type ClaudeHookEvent = (typeof HOOK_EVENT_NAMES)[number];
@@ -250,7 +251,7 @@ export async function uninstallHooksCommand(cwd: string, opts: { shared?: boolea
   const { settings: next, removed } = removeHoldline(settings);
   if (removed) {
     await writeJson(file, next);
-    io.log(`Removed ${removed} holdline hook${removed === 1 ? '' : 's'} from ${io.c.bold(rel)}. Other settings and hooks were left as they were.`);
+    io.log(`Removed ${plural(removed, 'holdline hook')} from ${io.c.bold(rel)}. Other settings and hooks were left as they were.`);
   } else {
     io.log(`No holdline hooks in ${rel}.`);
   }

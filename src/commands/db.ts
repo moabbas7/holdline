@@ -5,6 +5,7 @@ import { schemaDrift, type DriftItem } from '../probes/database/diff.js';
 import { describeTarget } from '../probes/database/live/target.js';
 import { displayName, type DbSchema, type FilesCapture, type LiveCapture, type Table } from '../probes/database/types.js';
 import { openProject } from './common.js';
+import { plural } from '../plural.js';
 
 export interface DbOptions {
   json?: boolean;
@@ -69,12 +70,12 @@ function printDb(r: DbResult, io: Io): void {
   const keys = Object.keys(s.tables).sort();
   io.log(
     c.dim(
-      `${keys.length} table${keys.length === 1 ? '' : 's'}, ${Object.keys(s.views).length} view${Object.keys(s.views).length === 1 ? '' : 's'}, ` +
-        `${Object.keys(s.enums).length} enum${Object.keys(s.enums).length === 1 ? '' : 's'} (${s.dialect})`,
+      `${plural(keys.length, 'table')}, ${plural(Object.keys(s.views).length, 'view')}, ` +
+        `${plural(Object.keys(s.enums).length, 'enum')} (${s.dialect})`,
     ),
   );
   for (const k of keys.slice(0, MAX_TABLES)) printTable(k, s.tables[k]!, io);
-  if (keys.length > MAX_TABLES) io.log(c.dim(`\n…and ${keys.length - MAX_TABLES} more tables (use --json for all)`));
+  if (keys.length > MAX_TABLES) io.log(c.dim(`\n…and ${plural(keys.length - MAX_TABLES, 'more table')} (use --json for all)`));
   if (Object.keys(s.enums).length) {
     io.log();
     io.log(c.bold('Enums'));
@@ -100,7 +101,7 @@ function printTable(key: string, t: Table, io: Io): void {
   const { c } = io;
   io.log();
   const pol = Object.keys(t.policies).length;
-  const rls = t.rls === null ? '' : t.rls ? c.green(` RLS on${pol ? `, ${pol} polic${pol === 1 ? 'y' : 'ies'}` : ', no policies'}`) : c.yellow(' RLS off');
+  const rls = t.rls === null ? '' : t.rls ? c.green(` RLS on${pol ? `, ${plural(pol, 'policy', 'policies')}` : ', no policies'}`) : c.yellow(' RLS off');
   io.log(`${c.bold(displayName(key))}${rls}${t.definedIn ? c.dim(`  ${t.definedIn}`) : ''}`);
   const cols = Object.values(t.columns);
   const w = Math.min(28, Math.max(4, ...cols.map((x) => x.name.length)));

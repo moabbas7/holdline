@@ -1,5 +1,6 @@
 import type { Dependent } from './graph.js';
 import type { BrokenImport, DepGraph, Edge } from './types.js';
+import { agree, plural } from '../../plural.js';
 
 export type NodeCategory = 'page' | 'route' | 'table' | 'file';
 
@@ -44,12 +45,7 @@ export function relation(e: Edge): string {
 }
 
 const ORDER: NodeCategory[] = ['page', 'route', 'table', 'file'];
-const PLURAL: Record<NodeCategory, [string, string]> = {
-  page: ['page', 'pages'],
-  route: ['API route', 'API routes'],
-  table: ['table', 'tables'],
-  file: ['file', 'files'],
-};
+const NOUN: Record<NodeCategory, string> = { page: 'page', route: 'API route', table: 'table', file: 'file' };
 
 /** "2 API routes, 3 pages, 4 files" */
 export function summarizeDependents(g: DepGraph, deps: Dependent[]): string {
@@ -59,8 +55,13 @@ export function summarizeDependents(g: DepGraph, deps: Dependent[]): string {
     counts.set(c, (counts.get(c) ?? 0) + 1);
   }
   return ORDER.filter((c) => counts.get(c))
-    .map((c) => `${counts.get(c)} ${PLURAL[c][counts.get(c) === 1 ? 0 : 1]}`)
+    .map((c) => plural(counts.get(c)!, NOUN[c]))
     .join(', ');
+}
+
+/** "lib/db.ts (modified) → 1 page depends on it", "… → 2 pages, 1 file depend on it": the verb agrees with the total. */
+export function dependentsTitle(g: DepGraph, changedPath: string, status: string, deps: Dependent[]): string {
+  return `${changedPath} (${status}) → ${summarizeDependents(g, deps)} ${agree(deps.length, 'depends', 'depend')} on it`;
 }
 
 /** One line per dependent: direct ones first, then by category. */

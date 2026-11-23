@@ -3,6 +3,7 @@ import { CHECK_NAMES, type CheckName } from '../core/config.js';
 import { runCommand } from '../core/runner.js';
 import type { Finding, Probe, ProbeReport } from './types.js';
 import { posix } from '../core/paths.js';
+import { plural } from '../plural.js';
 
 export interface CheckResult {
   command: string;
@@ -103,7 +104,7 @@ export const checksProbe: Probe<ChecksSnapshot> = {
       status: regressions > 0 ? 'regressed' : 'ok',
       summary:
         regressions > 0
-          ? `${regressions} check${regressions > 1 ? 's' : ''} went from passing to failing`
+          ? `${plural(regressions, 'check')} went from passing to failing`
           : names.length === 0
             ? 'no checks configured'
             : 'no check went from passing to failing',

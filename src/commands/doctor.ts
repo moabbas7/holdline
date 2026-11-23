@@ -20,6 +20,7 @@ import { relativeTime } from './common.js';
 import { HOOK_EVENT_NAMES, isHoldlineHandler, onPath, readSettings, settingsPath, type CommandHandler } from './hooks.js';
 import { posix } from '../core/paths.js';
 import { MIN_NODE, nodeAtLeast } from '../version.js';
+import { plural } from '../plural.js';
 
 export type Level = 'ok' | 'warn' | 'error' | 'info';
 export interface DoctorItem {
@@ -97,7 +98,7 @@ function finish(items: DoctorItem[], io: Io): DoctorResult {
   const errors = items.filter((i) => i.level === 'error').length;
   const warns = items.filter((i) => i.level === 'warn').length;
   io.log();
-  io.log(errors ? io.c.red(`${errors} problem${errors === 1 ? '' : 's'} to fix${warns ? `, ${warns} warning${warns === 1 ? '' : 's'}` : ''}.`) : warns ? `No problems; ${warns} warning${warns === 1 ? '' : 's'}.` : io.c.green('Everything looks good.'));
+  io.log(errors ? io.c.red(`${plural(errors, 'problem')} to fix${warns ? `, ${plural(warns, 'warning')}` : ''}.`) : warns ? `No problems; ${plural(warns, 'warning')}.` : io.c.green('Everything looks good.'));
   return { items, exitCode: errors ? 2 : 0 };
 }
 
@@ -181,7 +182,7 @@ async function hookChecks(root: string, config: Config | null, env: NodeJS.Proce
     const missing = HOOK_EVENT_NAMES.filter((e) => !f.events.has(e));
     add('Claude Code hooks', missing.length ? 'error' : 'ok', `${f.file}: ${missing.length ? `missing ${missing.join(', ')}` : HOOK_EVENT_NAMES.join(', ')}`, missing.length ? `run \`holdline install-hooks${f.file.endsWith('settings.json') ? ' --shared' : ''}\` again` : undefined);
     for (const [event, handlers] of f.events) {
-      if (handlers.length > 1) add('Claude Code hooks', 'warn', `${f.file}: ${handlers.length} holdline handlers for ${event}`, 'run `holdline install-hooks` again (it replaces them)');
+      if (handlers.length > 1) add('Claude Code hooks', 'warn', `${f.file}: ${plural(handlers.length, 'holdline handler')} for ${event}`, 'run `holdline install-hooks` again (it replaces them)');
       for (const h of handlers) {
         const problem = commandProblem(root, h.command!, env);
         if (problem) add('Claude Code hooks', 'error', `${event} runs \`${h.command}\`, but ${problem}`, 'run `holdline install-hooks` again, or install holdline');
@@ -216,7 +217,7 @@ async function playwrightCheck(root: string, config: Config, add: Add): Promise<
     /* unknown */
   }
   if (!exe || !existsSync(exe)) add('Visual check', 'error', `Playwright found (${pw.from}), but its Chromium is not installed`, installCommands(config.packageManager).at(-1));
-  else add('Visual check', 'ok', `Playwright and Chromium found (${pw.from}); ${v.pages.length} page${v.pages.length === 1 ? '' : 's'}`);
+  else add('Visual check', 'ok', `Playwright and Chromium found (${pw.from}); ${plural(v.pages.length, 'page')}`);
 }
 
 async function databaseChecks(root: string, config: Config, env: NodeJS.ProcessEnv, add: Add): Promise<void> {
@@ -278,5 +279,5 @@ async function lockChecks(root: string, add: Add): Promise<void> {
   const session = await readSession(root).catch(() => null);
   if (session) add('Lock and session', 'info', `session: "${session.task.split('\n')[0]!.slice(0, 70)}" (${relativeTime(session.createdAt)})`);
   const state = await readState(root);
-  if (state.turn) add('Lock and session', 'info', `hooks: ${state.turn.status} turn of Claude session ${state.turn.claudeSessionId.slice(0, 8)} (${relativeTime(state.turn.updatedAt)}, ${state.turn.fixRounds} fix round${state.turn.fixRounds === 1 ? '' : 's'})`);
+  if (state.turn) add('Lock and session', 'info', `hooks: ${state.turn.status} turn of Claude session ${state.turn.claudeSessionId.slice(0, 8)} (${relativeTime(state.turn.updatedAt)}, ${plural(state.turn.fixRounds, 'fix round')})`);
 }

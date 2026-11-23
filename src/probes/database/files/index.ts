@@ -6,6 +6,7 @@ import { emptySchema, type DbSchema, type FilesCapture } from '../types.js';
 import { applyDrizzle, looksLikeDrizzle } from './drizzle.js';
 import { applyPrisma } from './prisma.js';
 import { replaySqlFiles } from './sql.js';
+import { plural } from '../../../plural.js';
 
 interface SqlGroup {
   label: string;
@@ -105,7 +106,7 @@ export async function captureFiles(root: string, found?: SchemaFileSet): Promise
     for (const g of set.sql) {
       const r = await replaySqlFiles(s, await read(g.files));
       warnings.push(...r.warnings);
-      sources.push({ kind: 'sql', label: `${g.group} (${g.files.length} file${g.files.length > 1 ? 's' : ''})`, files: g.files });
+      sources.push({ kind: 'sql', label: `${g.group} (${plural(g.files.length, 'file')})`, files: g.files });
     }
     parts.push(s);
   }

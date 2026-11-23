@@ -6,6 +6,7 @@
  */
 import { canonPg, SERIAL_TYPES } from '../canon.js';
 import { emptyTable, type DbSchema, type Policy, type Table } from '../types.js';
+import { plural } from '../../../plural.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Node = any;
@@ -639,7 +640,7 @@ export async function replaySqlFiles(
           firstErr ||= (e instanceof Error ? e.message : String(e)).slice(0, 100);
         }
       }
-      if (bad > 0) warnings.push(`${f.path}: skipped ${bad} statement${bad > 1 ? 's' : ''} that could not be parsed (${firstErr})`);
+      if (bad > 0) warnings.push(`${f.path}: skipped ${plural(bad, 'statement')} that could not be parsed (${firstErr})`);
     }
     const r = new Replayer(schema, f.path);
     for (const { stmt } of stmts) {

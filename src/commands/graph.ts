@@ -9,6 +9,7 @@ import { buildGraph, dependenciesOf, dependentsOf, indexGraph, type Dependent } 
 import { matchRoute } from '../probes/dependencies/routes.js';
 import type { BrokenImport, DepGraph, Edge, GraphStats } from '../probes/dependencies/types.js';
 import { openProject } from './common.js';
+import { plural } from '../plural.js';
 
 export interface GraphOptions {
   json?: boolean;
@@ -120,7 +121,7 @@ function printGraph(g: DepGraph, r: GraphResult, io: Io): void {
   io.log();
   io.log(
     io.c.dim(
-      `Graph: ${r.stats.files} files, ${r.stats.edges} edges, ${r.stats.routes} API routes, ${r.stats.tables} tables ` +
+      `Graph: ${plural(r.stats.files, 'file')}, ${plural(r.stats.edges, 'edge')}, ${plural(r.stats.routes, 'API route')}, ${plural(r.stats.tables, 'table')} ` +
         `(${r.stats.parsed} parsed, ${r.stats.cached} cached, ${(r.stats.ms / 1000).toFixed(1)}s)`,
     ),
   );

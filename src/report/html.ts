@@ -7,6 +7,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { isFooter, type ReportFinding, type ScopedReport } from './model.js';
 import { scopeLine } from './terminal.js';
+import { agree, plural } from '../plural.js';
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
@@ -103,17 +104,17 @@ export async function renderHtml(r: ScopedReport, root: string): Promise<string>
   let inHtml = `<section class="in-scope"><h2>In the task area <span class="n">(${inScope.length})</span></h2>`;
   if (inRegs.length) inHtml += (await Promise.all(inRegs.map((f) => findingHtml(root, f)))).join('');
   if (inRest.length) {
-    inHtml += `<details><summary>${inRest.length} change${inRest.length === 1 ? '' : 's'} in the task area</summary>${(await Promise.all(inRest.map((f) => findingHtml(root, f)))).join('')}</details>`;
+    inHtml += `<details><summary>${plural(inRest.length, 'change')} in the task area</summary>${(await Promise.all(inRest.map((f) => findingHtml(root, f)))).join('')}</details>`;
   }
   if (!inScope.length) inHtml += '<p class="empty">Nothing here.</p>';
   inHtml += '</section>';
 
   let footerHtml = '';
   if (footer.length) {
-    footerHtml = `<section class="footer"><details><summary>Also: ${footer.length} fixed, already-failing or informational item${footer.length === 1 ? '' : 's'}</summary>${(await Promise.all(footer.map((f) => findingHtml(root, f)))).join('')}</details></section>`;
+    footerHtml = `<section class="footer"><details><summary>Also: ${plural(footer.length, 'fixed, already-failing or informational item')}</summary>${(await Promise.all(footer.map((f) => findingHtml(root, f)))).join('')}</details></section>`;
   }
   const own = r.ownOutputs.excluded.length
-    ? `<p class="meta">${r.ownOutputs.excluded.length} file(s) written by your own checks during <code>holdline before</code> were not counted as agent changes. Add to .gitignore: ${r.ownOutputs.gitignoreSuggestion.map((l) => `<code>${esc(l)}</code>`).join(' ')}</p>`
+    ? `<p class="meta">${plural(r.ownOutputs.excluded.length, 'file')} written by your own checks during <code>holdline before</code> ${agree(r.ownOutputs.excluded.length, 'was', 'were')} not counted as agent changes. Add to .gitignore: ${r.ownOutputs.gitignoreSuggestion.map((l) => `<code>${esc(l)}</code>`).join(' ')}</p>`
     : '';
   const probes = `<h2>Checked</h2><table class="probes">${r.probes.map((p) => `<tr><td>${esc(p.title)}</td><td>${esc(p.summary)}</td></tr>`).join('')}</table>`;
 

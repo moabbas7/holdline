@@ -8,6 +8,7 @@ import { writeCompactJson } from '../dependencies/store.js';
 import { captureFiles, findSchemaFiles } from './files/index.js';
 import { captureLive } from './live/index.js';
 import { DB_SCHEMA_VERSION, dbSettings, type DbCapture, type DbRef, type DbSettings } from './types.js';
+import { plural } from '../../plural.js';
 
 export function settingsFrom(config: Config | null): DbSettings {
   return dbSettings(config?.probes?.database as Record<string, unknown> | undefined);
@@ -57,13 +58,12 @@ export async function readCapture(root: string, ref: DbRef | undefined): Promise
 /** One-line description of where a capture's schema came from. */
 export function describeCapture(c: DbCapture): string {
   const parts: string[] = [];
-  const count = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
   if (c.live.status === 'ok' && c.live.schema && c.live.target) {
     const t = c.live.target;
-    parts.push(`${count(Object.keys(c.live.schema.tables).length, 'table')} from the live database (${t.dialect === 'sqlite' ? `SQLite ${t.host}` : `Postgres at ${t.host}:${t.port}`})`);
+    parts.push(`${plural(Object.keys(c.live.schema.tables).length, 'table')} from the live database (${t.dialect === 'sqlite' ? `SQLite ${t.host}` : `Postgres at ${t.host}:${t.port}`})`);
   }
   if (c.files.schema) {
-    parts.push(`${count(Object.keys(c.files.schema.tables).length, 'table')} from ${c.files.sources.map((s) => s.label).join(', ')}`);
+    parts.push(`${plural(Object.keys(c.files.schema.tables).length, 'table')} from ${c.files.sources.map((s) => s.label).join(', ')}`);
   }
   return parts.join('; ') || 'no schema files or database connection found';
 }
