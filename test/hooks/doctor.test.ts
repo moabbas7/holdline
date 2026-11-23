@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { doctorCommand } from '../../src/commands/doctor.js';
 import { installHooksCommand } from '../../src/commands/hooks.js';
+import { sentinel } from '../helpers/secrets.js';
 import { cleanupAll, fakeIo, makeRepo, tmpDir, writeConfig, type TestRepo } from '../helpers/tmpRepo.js';
 
 let xdg: string | undefined;
@@ -51,7 +52,17 @@ describe('holdline doctor', { timeout: 60_000 }, () => {
     expect(r.out).toContain('✓ .holdline/config.json: node, npm; checks: build');
     expect(r.out).toContain('✓ .claude/settings.local.json: SessionStart, UserPromptSubmit, Stop, SessionEnd');
     expect(r.out).toContain('✓ no lock held');
-    for (const s of ['Git', 'Config', 'Claude Code hooks', 'Visual check', 'Database safety', 'Lock and session']) expect(r.out).toContain(s);
+    expect(r.out).toContain(`✓ Node.js ${process.versions.node}`);
+    for (const s of ['Node.js', 'Git', 'Config', 'Claude Code hooks', 'Visual check', 'Database safety', 'Lock and session']) expect(r.out).toContain(s);
+  });
+
+  it('a Node.js older than package.json "engines" allows is an error', async () => {
+    const { t, env } = await healthy();
+    const io = fakeIo();
+    const r = await doctorCommand(t.dir, { env, nodeVersion: '22.12.0' }, io);
+    expect(r.exitCode).toBe(2);
+    expect(io.logs.join('\n')).toContain('✗ Node.js 22.12.0 is too old: holdline needs 22.13 or later');
+    expect((await doctorCommand(t.dir, { env, nodeVersion: 'v22.13.0' }, fakeIo())).items).toContainEqual(expect.objectContaining({ section: 'Node.js', level: 'ok' }));
   });
 
   it('missing config', async () => {
@@ -90,13 +101,14 @@ describe('holdline doctor', { timeout: 60_000 }, () => {
 
   it('database safety: a non-local URL is named by host only, and allow-lists are flagged', async () => {
     const { t, env } = await healthy();
-    t.write('.env', 'DATABASE_URL=postgres://admin:hunter2@db.prod.example.com:5432/app\n');
+    const [user, password] = [sentinel('user'), sentinel('password')];
+    t.write('.env', `DATABASE_URL=postgres://${user}:${password}@db.prod.example.com:5432/app\n`);
     await writeConfig(t.dir, { build: 'npm run build' }, { probes: { database: { allowHosts: ['db.staging.internal'] }, api: { live: { enabled: true, requests: [{ path: '/api/x' }] } } } });
     const r = await doctor(t, env);
     expect(r.out).toContain("the dev server checks won't start: DATABASE_URL in .env points at db.prod.example.com");
     expect(r.out).toContain('! probes.database.allowHosts lets holdline connect to: db.staging.internal');
-    expect(r.out).not.toContain('hunter2');
-    expect(r.out).not.toContain('admin');
+    expect(r.out).not.toContain(user);
+    expect(r.out).not.toContain(password);
   });
 
   it('HOLDLINE_HOOKS=off and hooks in both files are warnings', async () => {

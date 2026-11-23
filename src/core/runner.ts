@@ -3,6 +3,7 @@ import { createWriteStream } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { killProcessTree } from './processTree.js';
+import { assertStarting } from './stop.js';
 
 export interface RunResult {
   exitCode: number | null;
@@ -15,8 +16,11 @@ export interface RunResult {
 
 const TAIL_BYTES = 4096;
 const KILL_GRACE_MS = 3000;
+/** How long killAllChecks waits for a killed tree to be gone. */
+const KILL_WAIT_MS = 5000;
 
-const active = new Set<ChildProcess>();
+/** Running checks, each with a promise that settles on its 'close'. */
+const active = new Map<ChildProcess, Promise<void>>();
 
 function killTree(child: ChildProcess, signal: NodeJS.Signals): void {
   if (child.pid === undefined) return;
@@ -25,9 +29,28 @@ function killTree(child: ChildProcess, signal: NodeJS.Signals): void {
 
 process.on('exit', () => killAllChecks());
 
-/** SIGKILL every running check's process group (a hook out of time). */
+/** SIGKILL every running check's process tree and wait until it is gone (a hook out of time). */
 export function killAllChecks(): void {
-  for (const child of active) killTree(child, 'SIGKILL');
+  for (const child of active.keys()) {
+    if (child.pid !== undefined) killProcessTree(child.pid, 'SIGKILL', { waitMs: KILL_WAIT_MS });
+  }
+}
+
+/**
+ * Kill every running check and wait (at most `ms`) until each has closed: 'close' comes
+ * after the process exited and every process holding its output pipes did too, so it also
+ * covers grandchildren. Returns true when all closed in time.
+ */
+export async function stopAllChecks(ms = KILL_WAIT_MS): Promise<boolean> {
+  const closing = [...active.values()];
+  killAllChecks();
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<false>((r) => (timer = setTimeout(() => r(false), ms)));
+  try {
+    return await Promise.race([Promise.all(closing).then(() => true as const), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -38,12 +61,20 @@ export async function runCommand(
   command: string,
   opts: { cwd: string; timeoutMs: number; logFile: string },
 ): Promise<RunResult> {
+  assertStarting(`\`${command}\``);
   await mkdir(path.dirname(opts.logFile), { recursive: true });
   const log = createWriteStream(opts.logFile);
   log.write(`$ ${command}\n\n`);
   const started = Date.now();
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
+    // Checked again: the gate may have closed while the log folder was being created.
+    try {
+      assertStarting(`\`${command}\``);
+    } catch (e) {
+      log.end(() => reject(e));
+      return;
+    }
     const child = spawn(command, {
       cwd: opts.cwd,
       shell: true,
@@ -52,7 +83,13 @@ export async function runCommand(
       windowsHide: true,
       env: { ...process.env, CI: 'true', FORCE_COLOR: '0', NO_COLOR: '1' },
     });
-    active.add(child);
+    active.set(
+      child,
+      new Promise<void>((r) => {
+        child.once('close', () => r());
+        child.once('error', () => r()); // failed to start: there may be no 'close'
+      }),
+    );
     let tail = Buffer.alloc(0);
     const onData = (d: Buffer) => {
       log.write(d);

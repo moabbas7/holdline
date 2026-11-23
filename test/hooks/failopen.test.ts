@@ -1,7 +1,10 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { git } from '../../src/core/git.js';
+import { runCommand } from '../../src/core/runner.js';
 import { NOT_CONFIGURED } from '../../src/hooks/handlers.js';
 import { buildCli } from '../helpers/cli.js';
 import { cleanupAll, makeRepo, tmpDir } from '../helpers/tmpRepo.js';
@@ -18,6 +21,38 @@ function expectAtMostOneLine(stdout: string): void {
   const o = JSON.parse(lines[0]!) as Record<string, unknown>;
   expect(o.decision).toBeUndefined();
   if (o.systemMessage !== undefined) expect(String(o.systemMessage)).not.toContain('\n');
+}
+
+/**
+ * A portable `sleep 30` that starts a child of its own. Each records its pid (and the
+ * sleeper its parent's: the shell on Windows) so a test can check the whole tree is gone.
+ */
+function sleeperTree(): { command: string; pids: () => number[] } {
+  const dir = tmpDir();
+  const script = path.join(dir, 'sleeper.cjs');
+  writeFileSync(
+    script,
+    `const fs = require('fs'), path = require('path');
+const role = process.argv[2] || 'sleeper';
+fs.writeFileSync(path.join(__dirname, role + '.json'), JSON.stringify({ pid: process.pid, ppid: process.ppid }));
+if (role === 'sleeper') require('child_process').spawn(process.execPath, [__filename, 'grandchild'], { stdio: 'inherit' });
+setTimeout(() => {}, 30000);
+`,
+  );
+  return {
+    command: `"${process.execPath}" "${script}"`,
+    pids: () => {
+      const tree: number[] = [];
+      for (const role of ['sleeper', 'grandchild']) {
+        const f = path.join(dir, `${role}.json`);
+        if (!existsSync(f)) continue;
+        const p = JSON.parse(readFileSync(f, 'utf8')) as { pid: number; ppid: number };
+        tree.push(p.pid);
+        if (role === 'sleeper' && p.ppid !== process.pid) tree.push(p.ppid); // the shell, unless sh exec'd node
+      }
+      return tree;
+    },
+  };
 }
 
 /** A lock file held by another live process (this test's parent). */
@@ -81,21 +116,47 @@ describe('fail open', { timeout: 120_000 }, () => {
   });
 
   it('out of time: the checks are stopped, the prompt goes ahead with one line, and the turn is not checked', async () => {
-    // A portable `sleep 30` that records its pid, so the test can check it was killed.
-    const sleeper = `"${process.execPath}" -e "require('fs').writeFileSync('sleeper.pid', String(process.pid)); setTimeout(() => {}, 30000)"`;
-    const t = await hookRepo({ checks: { build: { command: sleeper, timeoutSec: 60 }, typecheck: null, lint: null, test: null } });
+    const s = sleeperTree();
+    const t = await hookRepo({ checks: { build: { command: s.command, timeoutSec: 60 }, typecheck: null, lint: null, test: null } });
     const started = Date.now();
     const r = await prompt(t, 'add pagination to the users list', {}, { budgetMs: 1500 });
     expect(Date.now() - started).toBeLessThan(6000);
+    // Everything holdline started is gone the moment it returns (no waiting here): every
+    // process in the check's tree (if it got as far as starting), and the abandoned work,
+    // which released the lock.
+    const tree = s.pids();
+    expect(tree.filter(alive), `still running: ${tree.join(', ')}`).toEqual([]);
+    expect(existsSync(t.p('.holdline/lock'))).toBe(false);
     expectAtMostOneLine(r.stdout);
     expect(String(out(r).systemMessage)).toMatch(/^holdline: recording the baseline took longer than 2s, so this task isn't checked \(raise hooks\.promptBudgetSec/);
     expect(state(t).turn!.status).toBe('skipped');
-    // The sleeper (if it got as far as starting) was killed.
-    if (existsSync(t.p('sleeper.pid'))) {
-      const pid = Number(readFileSync(t.p('sleeper.pid'), 'utf8'));
-      for (let i = 0; i < 40 && alive(pid); i++) await new Promise((r) => setTimeout(r, 50));
-      expect(alive(pid)).toBe(false);
-    }
+  });
+
+  it('out of time while a check runs: its whole tree is gone on return, and nothing new starts', async () => {
+    const s = sleeperTree();
+    const t = await hookRepo();
+    const after: string[] = [];
+    const r = await hook('prompt', input(t, 'UserPromptSubmit', { prompt: 'x' }), {
+      budgetMs: 1500,
+      handler: async () => {
+        await runCommand(s.command, { cwd: t.dir, timeoutMs: 60_000, logFile: path.join(tmpDir(), 'sleeper.log') });
+        // The abandoned handler goes on after its check was killed; neither of these may start.
+        for (const next of [() => runCommand(s.command, { cwd: t.dir, timeoutMs: 60_000, logFile: path.join(tmpDir(), 'again.log') }), () => git(['status'], { cwd: t.dir })]) {
+          await next().then(
+            () => after.push('started'),
+            (e: Error) => after.push(e.name),
+          );
+        }
+        return { outcome: 'finished' };
+      },
+    });
+    expect(r.result.outcome).toBe('out-of-time');
+    const tree = s.pids();
+    expect(tree.length, 'the sleeper and its child both started').toBeGreaterThanOrEqual(2);
+    expect(tree.filter(alive), `still running: ${tree.join(', ')}`).toEqual([]);
+    expect(after).toEqual(['StoppedError', 'StoppedError']);
+    // Once the abandoned work has settled, processes may start again.
+    expect((await git(['rev-parse', '--git-dir'], { cwd: t.dir })).trim()).toBe('.git');
   });
 
   it('HOLDLINE_HOOKS=off turns every hook into a no-op', async () => {

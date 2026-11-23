@@ -6,6 +6,7 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import type { Browser, BrowserType } from 'playwright';
+import { assertStarting } from '../../core/stop.js';
 import type { PackageManager } from '../../core/config.js';
 
 export const PLAYWRIGHT_MODULES = ['playwright', '@playwright/test', 'playwright-core'];
@@ -61,6 +62,7 @@ export type LaunchResult = { ok: true; browser: Browser } | { ok: false; message
 
 /** Launch headless Chromium; a missing browser download becomes the install message. */
 export async function launchChromium(chromium: BrowserType, pm: PackageManager): Promise<LaunchResult> {
+  assertStarting('Chromium');
   try {
     return { ok: true, browser: await chromium.launch({ headless: true }) };
   } catch (e) {

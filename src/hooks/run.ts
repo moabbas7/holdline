@@ -8,9 +8,10 @@ import { appendFile, mkdir, writeFile } from 'node:fs/promises';
 import { mkdirSync, openSync } from 'node:fs';
 import path from 'node:path';
 import { getRepo } from '../core/git.js';
-import { killAllChecks } from '../core/runner.js';
+import { stopAllChecks } from '../core/runner.js';
+import { allowStarting, stopStarting } from '../core/stop.js';
 import { makeColors, type Io } from '../io.js';
-import { killAllDevServers } from '../probes/devServer.js';
+import { stopAllDevServers } from '../probes/devServer.js';
 import {
   loadConfigOrNull,
   promptHook,
@@ -109,6 +110,33 @@ function budgetFor(event: HookEvent, s: ReturnType<typeof hookSettings>): number
   }
 }
 
+/**
+ * After the budget runs out: the longest holdline waits for what it started to be gone
+ * (checks, dev servers, and the abandoned handler, which then releases the lock). It fits in
+ * the room hookTimeouts() leaves between the budget and Claude Code's own timeout.
+ */
+export const WIND_DOWN_MS = 8000;
+
+/**
+ * Out of time: stop starting processes, kill what runs, and wait (bounded) until the
+ * abandoned work has settled. Only then may processes start again; work that is still
+ * going keeps the gate closed (the CLI exits right after anyway).
+ */
+async function windDown(work: Promise<unknown>): Promise<void> {
+  stopStarting();
+  const until = Date.now() + WIND_DOWN_MS;
+  const left = () => Math.max(0, until - Date.now());
+  await stopAllChecks(left());
+  await stopAllDevServers(left());
+  let timer: NodeJS.Timeout | undefined;
+  const settled = await Promise.race([
+    work.then(() => true, () => true),
+    new Promise<false>((r) => (timer = setTimeout(() => r(false), left()))),
+  ]);
+  clearTimeout(timer);
+  if (settled) allowStarting();
+}
+
 const outOfTime = (event: HookEvent, sec: number) =>
   event === 'prompt'
     ? `holdline: recording the baseline took longer than ${sec}s, so this task isn't checked (raise hooks.promptBudgetSec in .holdline/config.json, or speed up the slowest check).`
@@ -121,6 +149,7 @@ export async function runHook(event: HookEvent, input: HookInput, opts: RunHookO
   const env = opts.env ?? process.env;
   let result: HookResult = { outcome: 'noop' };
   let root: string | null = null;
+  allowStarting();
   let io: ReturnType<typeof recordingIo> | null = null;
   try {
     if (hooksDisabled(env)) {
@@ -164,9 +193,6 @@ export async function runHook(event: HookEvent, input: HookInput, opts: RunHookO
                   /* best effort */
                 }
               }
-              // Stop the checks and dev servers this run started; the CLI exits right after.
-              killAllChecks();
-              killAllDevServers();
               resolve({ outcome: 'out-of-time', warning: outOfTime(event, Math.round(budget / 1000)) });
             }, budget);
           });
@@ -176,6 +202,8 @@ export async function runHook(event: HookEvent, input: HookInput, opts: RunHookO
           } finally {
             clearTimeout(timer);
           }
+          // Out of time: nothing this run started may outlive it (the CLI exits right after).
+          if (cancelled) await windDown(work);
         }
       }
     }

@@ -4,6 +4,7 @@ import { findConnectionString, parseDotenv } from '../../src/probes/database/liv
 import { redact, safeError } from '../../src/probes/database/live/redact.js';
 import { isLocalHost, parseConnectionString } from '../../src/probes/database/live/target.js';
 import { WINDOWS } from '../helpers/platform.js';
+import { sentinel } from '../helpers/secrets.js';
 import { cleanupAll, makeRepo } from '../helpers/tmpRepo.js';
 
 afterEach(cleanupAll);
@@ -91,19 +92,23 @@ describe('.env files', () => {
 });
 
 describe('redaction', () => {
-  const url = 'postgres://admin:S3cret-xyz@db.example.com:5432/app';
+  const [user, password] = [sentinel('user'), sentinel('password')];
+  const url = `postgres://${user}:${password}@db.example.com:5432/app`;
   const secrets = parseConnectionString(url, { root: '/' }).secrets;
+  const expectNoSecrets = (msg: string) => {
+    expect(msg).not.toContain(user);
+    expect(msg).not.toContain(password);
+  };
 
   it('removes the URL, password and user from any message', () => {
-    const msg = redact(`failed to connect to ${url} as admin with password S3cret-xyz`, secrets);
-    expect(msg).not.toMatch(/S3cret|admin/);
+    expectNoSecrets(redact(`failed to connect to ${url} as ${user} with password ${password}`, secrets));
     expect(redact('see postgres://someone:else@host/db', [])).toBe('see postgres://***@host/db');
   });
 
   it('turns driver errors into fixed, secret-free explanations', () => {
-    expect(safeError(Object.assign(new Error('password authentication failed for user "admin"'), { code: '28P01' }), secrets)).toBe('authentication failed');
+    expect(safeError(Object.assign(new Error(`password authentication failed for user "${user}"`), { code: '28P01' }), secrets)).toBe('authentication failed');
     expect(safeError(Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5432'), { code: 'ECONNREFUSED' }), secrets)).toMatch(/connection refused/);
     expect(safeError(Object.assign(new Error('database "app" does not exist'), { code: '3D000' }), secrets)).toBe('database does not exist');
-    expect(safeError(new Error(`weird failure mentioning ${url} and S3cret-xyz`), secrets)).not.toMatch(/S3cret|admin/);
+    expectNoSecrets(safeError(new Error(`weird failure mentioning ${url} and ${password} for ${user}`), secrets));
   });
 });

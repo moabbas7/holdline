@@ -11,10 +11,11 @@ import { visualCommand } from '../../src/commands/visual.js';
 import { PLAYWRIGHT } from '../helpers/playwright.js';
 import { cleanupAll, fakeIo, tmpDir } from '../helpers/tmpRepo.js';
 import { starts, visualRepo } from './helpers.js';
+import { sentinel } from '../helpers/secrets.js';
 
 afterEach(cleanupAll);
 
-const SECRET = 'SECRET-COOKIE-VALUE-7f3a9';
+const SECRET = sentinel('cookie');
 
 function stateFile(dir: string, name = 'auth.json'): string {
   const file = path.join(dir, name);

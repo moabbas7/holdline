@@ -5,6 +5,7 @@ import { diffShapes, shapeOfValue, shapeText, union } from '../../src/probes/api
 import type { RouteApi, Shape } from '../../src/probes/api/types.js';
 import { fixtureRepo } from '../helpers/fixtures.js';
 import { cleanupAll, fakeIo } from '../helpers/tmpRepo.js';
+import { sentinel } from '../helpers/secrets.js';
 
 afterEach(cleanupAll);
 
@@ -23,9 +24,10 @@ describe('shapes', () => {
   });
 
   it('keeps types, never values, for live JSON', () => {
-    const s = shapeOfValue({ token: 'SECRET', n: 1, list: [{ a: true }, { a: false, b: null }], empty: [] });
+    const secret = sentinel('token');
+    const s = shapeOfValue({ token: secret, n: 1, list: [{ a: true }, { a: false, b: null }], empty: [] });
     expect(shapeText(s)).toBe('{ token: string, n: number, list: { a: boolean, b?: null }[], empty: unknown[] }');
-    expect(JSON.stringify(s)).not.toContain('SECRET');
+    expect(JSON.stringify(s)).not.toContain(secret);
   });
 
   it('diffs: removed fields and type changes; unknown never counts as removed', () => {

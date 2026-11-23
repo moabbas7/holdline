@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { HoldlineError } from './errors.js';
+import { assertStarting } from './stop.js';
 
 export class GitError extends Error {
   constructor(
@@ -45,6 +46,7 @@ export function gitEnv(extra?: Record<string, string | undefined>): NodeJS.Proce
 /** Run git and return stdout. Throws GitError on non-zero exit. */
 export function git(args: string[], opts: GitOptions): Promise<string> {
   return new Promise((resolve, reject) => {
+    assertStarting('git');
     const child = spawn('git', args, {
       cwd: opts.cwd,
       env: gitEnv(opts.env),

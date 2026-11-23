@@ -15,10 +15,20 @@ import { databaseSafety, redactPath, runLive } from '../../src/probes/api/live.j
 import { apiSettings, type LiveSettings } from '../../src/probes/api/types.js';
 import { cleanupAll, fakeIo, makeRepo, tmpDir, writeConfig, type TestRepo } from '../helpers/tmpRepo.js';
 import { WINDOWS } from '../helpers/platform.js';
+import { sentinel } from '../helpers/secrets.js';
 
 afterEach(cleanupAll);
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+
+/** Values that must never be stored or printed. */
+const SECRETS = {
+  email: `${sentinel('email')}@example.com`,
+  token: sentinel('token'),
+  auth: sentinel('auth'),
+  cookie: sentinel('cookie'),
+  query: sentinel('query'),
+};
 
 /**
  * A dev server stand-in: logs every request it receives, starts a grandchild process, and
@@ -39,8 +49,8 @@ http.createServer((req, res) => {
     fs.appendFileSync(dir + '/requests.log', JSON.stringify({ method: req.method, url: req.url, headers: req.headers, body }) + '\\n');
     const json = (status, v) => { res.statusCode = status; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(v)); };
     if (req.url === '/api/users') return json(200, version === 1
-      ? { users: [{ id: 1, email: 'alice@secret.example' }], token: 'SECRET-TOKEN-VALUE' }
-      : { users: [{ id: '1' }], token: 'SECRET-TOKEN-VALUE' });
+      ? { users: [{ id: 1, email: '${SECRETS.email}' }], token: '${SECRETS.token}' }
+      : { users: [{ id: '1' }], token: '${SECRETS.token}' });
     if (req.url === '/api/redirect') { res.statusCode = 302; res.setHeader('location', '/api/private'); return res.end(); }
     if (req.url === '/api/items' && req.method === 'POST') return json(version === 1 ? 201 : 500, { id: 7 });
     if (req.url.startsWith('/api/slow')) return setTimeout(() => json(200, { ok: true }), 20000);
@@ -132,17 +142,17 @@ describe('live mode', () => {
       packageManager: 'npm',
       env,
       settings: settings({
-        headers: { authorization: 'Bearer SECRET-AUTH-HEADER' },
-        requests: [{ path: '/api/users?token=SECRET-QUERY' }, { method: 'POST', path: '/api/items', body: { name: 'x' }, headers: { cookie: 'sid=SECRET-COOKIE' } }],
+        headers: { authorization: `Bearer ${SECRETS.auth}` },
+        requests: [{ path: `/api/users?token=${SECRETS.query}` }, { method: 'POST', path: '/api/items', body: { name: 'x' }, headers: { cookie: `sid=${SECRETS.cookie}` } }],
       }),
     });
     const text = JSON.stringify(cap);
-    for (const secret of ['alice@secret.example', 'SECRET-TOKEN-VALUE', 'SECRET-AUTH-HEADER', 'SECRET-COOKIE', 'SECRET-QUERY']) expect(text).not.toContain(secret);
+    for (const secret of Object.values(SECRETS)) expect(text, `leaked ${secret}`).not.toContain(secret);
     expect(cap.results[0]!.path).toBe('/api/users?token=…');
     const [get, post] = requests(t);
-    expect(get!.headers.authorization).toBe('Bearer SECRET-AUTH-HEADER');
+    expect(get!.headers.authorization).toBe(`Bearer ${SECRETS.auth}`);
     expect(get!.headers.cookie).toBeUndefined();
-    expect(post!.headers.cookie).toBe('sid=SECRET-COOKIE');
+    expect(post!.headers.cookie).toBe(`sid=${SECRETS.cookie}`);
     expect(JSON.parse(post!.body)).toEqual({ name: 'x' });
     await expectTreeGone(t);
 
@@ -157,12 +167,14 @@ describe('live mode', () => {
 
   it('refuses to start when the database URL points at a non-local host, and says why', async () => {
     const t = serverRepo();
-    t.write('.env', 'DATABASE_URL=postgres://admin:hunter22@db.prod.example.com:5432/app\n');
+    const [user, password] = [sentinel('user'), sentinel('password')];
+    t.write('.env', `DATABASE_URL=postgres://${user}:${password}@db.prod.example.com:5432/app\n`);
     const cap = await runLive({ root: t.dir, packageManager: 'npm', env: cleanEnv(), settings: settings({ requests: [{ path: '/api/users' }] }) });
     expect(cap.status).toBe('refused');
     expect(cap.message).toContain('DATABASE_URL in .env points at db.prod.example.com');
     expect(cap.message).toContain('allowNonLocalDatabase');
-    expect(cap.message).not.toContain('hunter22');
+    expect(cap.message).not.toContain(user);
+    expect(cap.message).not.toContain(password);
     expect(existsSync(t.p('pids.json'))).toBe(false); // never started
 
     // From the environment, other schemes too; unparsable values are refused as well.
@@ -229,9 +241,11 @@ describe('live mode', () => {
       expect(titles).toContain('regression: [live] GET /api/users (200): response field "users[].id" changed type: number → string');
       expect(report.regressed).toBe(true);
       const stored = readFileSync(t.p('.holdline/api/api-after.json'), 'utf8') + readFileSync(t.p('.holdline/session.json'), 'utf8');
-      expect(stored).not.toContain('SECRET-TOKEN-VALUE');
-      expect(stored).not.toContain('alice@secret.example');
-      expect(io.logs.join('\n')).not.toContain('SECRET');
+      const logs = io.logs.join('\n');
+      for (const secret of [SECRETS.token, SECRETS.email]) {
+        expect(stored, `stored ${secret}`).not.toContain(secret);
+        expect(logs, `printed ${secret}`).not.toContain(secret);
+      }
       await expectTreeGone(t);
     } finally {
       process.env = saved;

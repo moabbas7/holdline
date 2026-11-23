@@ -8,7 +8,7 @@ A local CLI that catches what AI coding agents break outside the task they were 
 - **Never touches your branch, index or stash list** when it takes a snapshot.
 - **Rollback can be undone.** The current state is always snapshotted first.
 
-Requires Node ≥ 22.12 and git. CI runs the test suite on Linux, macOS and Windows.
+Requires Node ≥ 22.13 and git. CI runs the test suite on Linux, macOS and Windows.
 
 ## Install
 
@@ -214,7 +214,7 @@ Settings, all optional, in `.holdline/config.json`:
 }
 ```
 
-By default all user schemas are read, except Supabase's own (`auth`, `storage`, `realtime`, …). Set `"connect": false` to use schema files only. `pg` and the SQL parser are loaded only for projects that have SQL schema files or a database connection. Live SQLite needs Node 22.13 or later; on older versions holdline uses the schema files.
+By default all user schemas are read, except Supabase's own (`auth`, `storage`, `realtime`, …). Set `"connect": false` to use schema files only. `pg` and the SQL parser are loaded only for projects that have SQL schema files or a database connection.
 
 ## API shapes
 

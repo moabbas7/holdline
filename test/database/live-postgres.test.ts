@@ -12,6 +12,7 @@ import { dbSettings, emptySchema } from '../../src/probes/database/types.js';
 import { FIXTURES, fixtureRepo } from '../helpers/fixtures.js';
 import { startPg, type TestPg } from '../helpers/pglite.js';
 import { cleanupAll, fakeIo, writeConfig, type FakeIo, type TestRepo } from '../helpers/tmpRepo.js';
+import { sentinel } from '../helpers/secrets.js';
 
 let pg: TestPg;
 beforeAll(async () => {
@@ -29,7 +30,7 @@ afterEach(() => {
 });
 
 const MIGRATIONS = path.join(FIXTURES, 'supabase-db/supabase/migrations');
-const SECRET = 'Sentinel-Pa55word-9f3k';
+const SECRET = sentinel('password');
 /** For tests about the live connection itself: the dependency graph only adds run time. */
 const NO_GRAPH = { dependencies: { enabled: false } };
 const settings = dbSettings({});
@@ -280,7 +281,7 @@ describe('the local-host rule', () => {
 });
 
 describe('secrets', () => {
-  const user = 'sentinel_user_q7';
+  const user = sentinel('user');
   const scenarios: [string, () => string][] = [
     ['a working connection (PGlite ignores credentials)', () => pg.url({ user, password: SECRET })],
     ['a refused connection', () => `postgres://${user}:${SECRET}@127.0.0.1:1/postgres`],

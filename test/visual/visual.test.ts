@@ -12,6 +12,7 @@ import type { VisualCapture, VisualRef } from '../../src/probes/visual/types.js'
 import { PLAYWRIGHT } from '../helpers/playwright.js';
 import { cleanupAll, fakeIo } from '../helpers/tmpRepo.js';
 import { addToBody, editPage, expectTreeDead, starts, visualRepo } from './helpers.js';
+import { sentinel } from '../helpers/secrets.js';
 
 afterEach(cleanupAll);
 
@@ -64,10 +65,11 @@ describe.skipIf(!PLAYWRIGHT)('visual probe', () => {
     const pages = ['/', '/console', '/throw', '/request', '/blank', '/overlay', '/layout', '/servererror'];
     const t = await visualRepo({ pages });
     await beforeCommand(t.dir, { task: 'break things', yes: true }, fakeIo());
+    const query = sentinel('query');
 
     editPage(t, 'console', addToBody(`<script>console.error('Widget failed at ' + location.href + ' ' + Date.now())</script>`));
     editPage(t, 'throw', addToBody(`<script>throw new TypeError('cannot read properties of undefined')</script>`));
-    editPage(t, 'request', (h) => h.replace("fetch('/api/ok')", "fetch('/api/missing?token=SECRET-QUERY')"));
+    editPage(t, 'request', (h) => h.replace("fetch('/api/ok')", `fetch('/api/missing?token=${query}')`));
     editPage(t, 'blank', () => '<!doctype html><html><head><title>Blank</title></head><body><div id="root"></div></body></html>');
     editPage(
       t,
@@ -118,8 +120,8 @@ describe.skipIf(!PLAYWRIGHT)('visual probe', () => {
     expect(afterCap.capture.results.find((r) => r.page === '/layout' && r.viewport === 'desktop')!.rechecks).toBe(2);
 
     // Query values never stored.
-    expect(readFileSync(t.p('.holdline/visual/visual-after.json'), 'utf8')).not.toContain('SECRET-QUERY');
-    expect(io.logs.join('\n')).not.toContain('SECRET-QUERY');
+    expect(readFileSync(t.p('.holdline/visual/visual-after.json'), 'utf8')).not.toContain(query);
+    expect(io.logs.join('\n')).not.toContain(query);
   });
 
   it('reports pages that were fixed and problems that are still there', { timeout: T }, async () => {
@@ -213,14 +215,16 @@ describe.skipIf(!PLAYWRIGHT)('visual probe', () => {
 
   it('refuses to start the server when the database is not local', { timeout: T }, async () => {
     const t = await visualRepo({ pages: ['/'] });
-    t.write('.env', 'DATABASE_URL=postgres://u:hunter22@db.prod.example.com/app\n');
+    const [user, password] = [sentinel('user'), sentinel('password')];
+    t.write('.env', `DATABASE_URL=postgres://${user}:${password}@db.prod.example.com/app\n`);
     const io = fakeIo();
     await beforeCommand(t.dir, { task: 'x', yes: true }, io);
     expect(starts(t)).toBe(0);
     const w = io.warnings.join('\n');
     expect(w).toContain('DATABASE_URL in .env points at db.prod.example.com');
     expect(w).toContain('probes.visual.allowNonLocalDatabase');
-    expect(w).not.toContain('hunter22');
+    expect(w).not.toContain(user);
+    expect(w).not.toContain(password);
   });
 });
 

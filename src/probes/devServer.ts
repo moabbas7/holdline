@@ -14,6 +14,7 @@ import net from 'node:net';
 import path from 'node:path';
 import type { PackageManager } from '../core/config.js';
 import { killProcessTree } from '../core/processTree.js';
+import { assertStarting } from '../core/stop.js';
 import { DEFAULT_ENV_VARS, ENV_FILES, parseDotenv } from './database/live/env.js';
 import { isLocalHost, parseConnectionString } from './database/live/target.js';
 
@@ -207,9 +208,21 @@ export async function devCommand(root: string, pm: PackageManager): Promise<stri
   return null;
 }
 
-/** SIGKILL every running dev server's process group (a hook out of time). */
+/** SIGKILL every running dev server's process tree and wait until it is gone (a hook out of time). */
 export function killAllDevServers(): void {
-  for (const c of active) killGroupSync(c, 'SIGKILL');
+  for (const c of active) {
+    if (c.pid !== undefined) killProcessTree(c.pid, 'SIGKILL', { waitMs: 5000 });
+  }
+}
+
+/** Kill every running dev server and wait (at most `ms`) until each process tree is gone. */
+export async function stopAllDevServers(ms = 5000): Promise<boolean> {
+  const servers = [...active].filter((c) => c.pid !== undefined);
+  killAllDevServers();
+  const until = Date.now() + ms;
+  while (servers.some((c) => groupAlive(c.pid!)) && Date.now() < until) await new Promise((r) => setTimeout(r, 25));
+  for (const c of servers) if (!groupAlive(c.pid!)) active.delete(c);
+  return !servers.some((c) => groupAlive(c.pid!));
 }
 
 // Signal handlers are installed while at least one server is running.
@@ -270,6 +283,7 @@ export async function startDevServer(opts: StartOptions): Promise<StartResult> {
   const command = base.replaceAll('{port}', String(port));
 
   opts.progress?.(`  starting the dev server on port ${port} …`);
+  assertStarting('the dev server');
   const child = spawn(command, {
     cwd: opts.root,
     shell: true,

@@ -19,6 +19,7 @@ import { visualSettingsFrom } from '../probes/visual/index.js';
 import { relativeTime } from './common.js';
 import { HOOK_EVENT_NAMES, isHoldlineHandler, onPath, readSettings, settingsPath, type CommandHandler } from './hooks.js';
 import { posix } from '../core/paths.js';
+import { MIN_NODE, nodeAtLeast } from '../version.js';
 
 export type Level = 'ok' | 'warn' | 'error' | 'info';
 export interface DoctorItem {
@@ -34,12 +35,19 @@ export interface DoctorResult {
 
 export interface DoctorOptions {
   env?: NodeJS.ProcessEnv;
+  /** The Node.js version to check (tests); defaults to the running one. */
+  nodeVersion?: string;
 }
 
 export async function doctorCommand(cwd: string, opts: DoctorOptions, io: Io): Promise<DoctorResult> {
   const env = opts.env ?? process.env;
   const items: DoctorItem[] = [];
   const add = (section: string, level: Level, text: string, fix?: string) => items.push({ section, level, text, ...(fix ? { fix } : {}) });
+
+  // --- Node.js ---------------------------------------------------------------------------
+  const node = (opts.nodeVersion ?? process.versions.node).replace(/^v/, '');
+  if (nodeAtLeast(node, MIN_NODE)) add('Node.js', 'ok', `Node.js ${node}`);
+  else add('Node.js', 'error', `Node.js ${node} is too old: holdline needs ${MIN_NODE.replace(/\.0$/, '')} or later`, `install Node.js ${MIN_NODE.replace(/\.0$/, '')} or later (or the current LTS)`);
 
   // --- Git -------------------------------------------------------------------------------
   let repo: RepoInfo | null = null;
