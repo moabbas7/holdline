@@ -383,7 +383,7 @@ describe('probe: config and storage', () => {
     const t = fixtureRepo('next-supabase');
     await initCommand(t.dir, { yes: true }, fakeIo());
     const config = await loadConfig(t.dir);
-    expect(config.probes).toEqual({ dependencies: { enabled: true }, database: { enabled: true }, api: { enabled: true } });
+    expect(config.probes).toEqual({ dependencies: { enabled: true }, database: { enabled: true }, api: { enabled: true }, visual: { enabled: false, pages: ['/', '/users'] } });
     expect(dependenciesProbe.enabled(config)).toBe(true);
   });
 

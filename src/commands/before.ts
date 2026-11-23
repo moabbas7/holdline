@@ -6,6 +6,7 @@ import { readSession, writeSession, type Session } from '../core/session.js';
 import { createSnapshot, refName } from '../core/snapshot.js';
 import { ensureGitignore, stamp } from '../core/store.js';
 import type { Io } from '../io.js';
+import { DevServerPool } from '../probes/devServer.js';
 import { enabledProbes } from '../probes/registry.js';
 import type { ProbeContext } from '../probes/types.js';
 import { locked, preflightLargeFiles, short } from './common.js';
@@ -56,9 +57,14 @@ export async function beforeCommand(cwd: string, opts: BeforeOptions, io: Io): P
     const probes = enabledProbes(config);
     const results: Record<string, unknown> = {};
     if (probes.some((p) => p.id === 'checks')) io.log('Running checks:');
-    for (const probe of probes) {
-      const ctx: ProbeContext = { repo, root, config, snapshotSha: snap.sha, phase: 'before', runDir, io };
-      results[probe.id] = await probe.snapshot(ctx);
+    const devServers = new DevServerPool();
+    try {
+      for (const probe of probes) {
+        const ctx: ProbeContext = { repo, root, config, snapshotSha: snap.sha, phase: 'before', runDir, io, devServers };
+        results[probe.id] = await probe.snapshot(ctx);
+      }
+    } finally {
+      await devServers.dispose();
     }
 
     const session: Session = {

@@ -18,6 +18,7 @@ holdline after                                  # what went from passing to fail
 holdline graph lib/db.ts                        # what depends on a file (check the blast radius before a change)
 holdline db                                     # the database schema (local database, read-only, or schema files)
 holdline api                                    # every API route: methods, status codes, JSON response/request shapes
+holdline visual [pages…]                        # load pages in Chromium: errors, failed requests, blank/error screens, screenshots
 holdline rollback                               # restore the working tree to the "before" snapshot
 holdline undo-rollback                          # changed your mind: restore the state from just before the rollback
 ```
@@ -47,6 +48,7 @@ Each kind of check is a **probe** with `snapshot()` and `compare()` methods (`sr
 - `dependencies`: a dependency graph of the project (see below).
 - `database`: the database schema (see below).
 - `api`: API routes, status codes and JSON shapes (see below).
+- `visual`: pages in a real browser: errors, failed requests, blank or error screens and screenshots (opt-in, see below).
 
 Adding a probe means adding a module and registering it in `src/probes/registry.ts`; the core stays unchanged. A probe can be disabled with `"probes": { "<id>": { "enabled": false } }` in `.holdline/config.json`.
 
@@ -160,10 +162,73 @@ Live results are compared like static ones (labelled `[live]`): a 2xx that becam
 
 Limits: response shapes built from a variable the checker sees as `any` (common when `node_modules` isn't installed) are unknown, as are statuses not written as numbers or constants; errors thrown and turned into responses by a wrapper are not listed (the output notes "errors thrown are handled elsewhere"); `res.statusCode = n` assignments aren't followed. Turn the probe off with `"probes": { "api": { "enabled": false } }`, and set `probes.api.timeoutSec` (default 60) to cap static analysis time; routes not reached in time are unknown.
 
+## Visual check
+
+The `visual` probe (opt-in, **off by default**) starts your dev server, loads the pages you list in headless Chromium at a desktop (1280×800) and a mobile (390×844) width, and records for each:
+
+- a full-page screenshot;
+- console errors and uncaught page errors;
+- failed requests to the app's own origin (4xx/5xx and network failures; requests to other hosts are ignored);
+- whether the page is blank or shows a framework error screen (the Next.js error overlay, Next's "Application error" page, the Vite or webpack overlay), and whether it loaded at all.
+
+**Install.** Playwright is not a dependency of holdline. Install it in your project when you turn the check on:
+
+```sh
+npm install -D playwright
+npx playwright install chromium
+```
+
+(or the `pnpm`/`yarn`/`bun` equivalents). If it isn't installed, `before`/`after` print these commands, skip the visual check and carry on.
+
+**Turn it on.** `holdline init` suggests pages from the routes the dependency graph finds (static Next.js pages, `/` otherwise) and asks before enabling the check; with `--yes` the suggestions are written but the check stays off. Settings in `.holdline/config.json`:
+
+```json
+"probes": {
+  "visual": {
+    "enabled": true,
+    "pages": ["/", "/pricing", { "path": "/dashboard", "mask": [".avatar"] }],
+    "mask": ["[data-testid=timestamp]", ".ad-slot"],
+    "storageState": "../auth/dev-user.json",
+    "command": "npm run dev",
+    "startupTimeoutSec": 90,
+    "pageTimeoutSec": 60,
+    "networkIdleTimeoutSec": 5,
+    "threshold": 0.0002,
+    "minPixels": 25,
+    "allowNonLocalDatabase": false
+  }
+}
+```
+
+`command`, `startupTimeoutSec` and `allowNonLocalDatabase` default to the `probes.api.live` values, then to `<pm> run dev` and 90 s.
+
+`holdline after` reports, as **regressions** (exit 1):
+
+- a page that loaded before now fails to load (HTTP 4xx/5xx, a navigation error or a timeout), is blank, or shows an error screen;
+- new console errors or uncaught errors;
+- new failed requests to the app's own origin.
+
+Error messages are compared without the dev server's port, line and column numbers, hashes and long numbers, so the same error in two runs counts as the same error.
+
+Each new problem is **confirmed** before it is reported: the page is reloaded in a fresh browser context up to 2 more times, and only problems that show up again are regressions. A problem that appears once and not on the reloads is reported as a **flaky** change, listing what appeared. In `before`, every page is loaded twice; a problem seen in only one of the two loads is recorded as flaky and never counts as new in `after`.
+
+**Visual differences** above a small threshold (more than 0.02% of pixels and at least 25 pixels) are **changes**, not regressions, because the task may have changed the UI on purpose. A difference must also show on every load: when the after screenshot differs, the page is reloaded up to 2 times, and if a reload matches the before screenshot the difference came from content that varies per load (a random tip, a rotating banner) and is only noted. Content that moved by a single pixel (sub-pixel layout jitter) is not counted. The report lists the before, after and diff images (`.holdline/visual/{before,after,diff}/`). A later phase will use the task description to decide which visual changes are unexpected.
+
+**Stable screenshots.** Animations, transitions and the text caret are disabled; the viewport, device scale, timezone (UTC), locale (en-US), colour scheme and reduced motion are fixed; holdline waits for the network to go quiet (at most `networkIdleTimeoutSec`, 5 s by default, since pages that poll never go quiet) and for fonts to load. Selectors in `mask` (and a page's own `mask`) are painted over. Dev-server overlays and indicators (the Next.js dev tools badge, Vite and webpack overlays) are hidden in screenshots; error overlays are still detected and reported. During `before`, two screenshots are taken a second apart; regions that differ (clocks, carousels, live counters), plus a margin of 32px, are recorded as **noisy** and ignored when comparing. The second `before` load adds regions that differ between loads (a random avatar, a per-request timestamp). Content that is the same for every load of one server run but different in the next (a "server started at" time, a build id) is not caught that way. Mask it. When more than half of a page is noisy or masked, the report says how much was left to compare.
+
+**Pages behind login.** Set `storageState` to a Playwright storage-state file you created yourself (for example with `npx playwright codegen --save-storage=auth.json http://localhost:3000`). holdline reads it into memory for the run and never copies, prints or stores its contents. Because the dev server runs on a random port, `localStorage` saved for a local origin (`http://localhost:3000`) is applied to holdline's server, and cookies saved for `127.0.0.1` also apply to `localhost` (pages are loaded as `http://localhost:<port>`, which dev servers like Next.js require for their dev resources). Keep it outside the project or git-ignored: holdline snapshots untracked files into `refs/holdline/`, so it refuses a file inside the project that git doesn't ignore.
+
+**The dev server** is started exactly as in API live mode, with the same safety rules (free port, TCP readiness check, refusal when a database URL points at a non-local host, the whole process tree killed afterwards, on errors and on Ctrl+C). When the API live check and the visual check are both on, the server is started once per run and used by both.
+
+`holdline visual [pages…] [--json]` runs the check now and prints what each page shows, without a snapshot or comparison. Pages on the command line replace the configured ones; screenshots go to `.holdline/visual/current/`. It works without `holdline init`.
+
+Speed: each page is loaded at both widths in parallel, twice in `before` (plus a one-second pause for the noise screenshot) and once in `after` (plus up to 2 reloads for a new problem). On a plain server that is about 1 s per page in `before`; a dev server that compiles pages on first request adds its compile time.
+
 ## Development
 
 ```sh
 npm install
 npm run build
+npx playwright install chromium   # once, for the visual tests (they are skipped with a message without it)
 npm test        # throwaway git repos in the OS temp dir; database tests use embedded Postgres (PGlite) and SQLite, no Docker
 ```

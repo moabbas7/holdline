@@ -6,6 +6,7 @@ import { readSession, type Session } from '../core/session.js';
 import { createSnapshot } from '../core/snapshot.js';
 import { stamp, writeJson } from '../core/store.js';
 import type { Io } from '../io.js';
+import { DevServerPool } from '../probes/devServer.js';
 import { enabledProbes } from '../probes/registry.js';
 import type { Finding, ProbeContext, ProbeReport } from '../probes/types.js';
 import { locked, preflightLargeFiles, relativeTime, short } from './common.js';
@@ -39,20 +40,25 @@ export async function afterCommand(cwd: string, opts: AfterOptions, io: Io): Pro
     const runDir = path.join(paths.runs, `${stamp()}-after`);
     const reports: ProbeReport[] = [];
     if (config.checks && Object.values(config.checks).some(Boolean)) io.log('Running checks:');
-    for (const probe of enabledProbes(config)) {
-      const ctx: ProbeContext = { repo, root, config, snapshotSha: snap.sha, phase: 'after', runDir, io };
-      const afterData = await probe.snapshot(ctx);
-      if (!(probe.id in session.probes)) {
-        reports.push({
-          probeId: probe.id,
-          title: probe.title,
-          status: 'skipped',
-          summary: 'not captured by `holdline before`; run before again to include it',
-          findings: [],
-        });
-        continue;
+    const devServers = new DevServerPool();
+    try {
+      for (const probe of enabledProbes(config)) {
+        const ctx: ProbeContext = { repo, root, config, snapshotSha: snap.sha, phase: 'after', runDir, io, devServers };
+        const afterData = await probe.snapshot(ctx);
+        if (!(probe.id in session.probes)) {
+          reports.push({
+            probeId: probe.id,
+            title: probe.title,
+            status: 'skipped',
+            summary: 'not captured by `holdline before`; run before again to include it',
+            findings: [],
+          });
+          continue;
+        }
+        reports.push(await probe.compare(session.probes[probe.id], afterData, ctx));
       }
-      reports.push(await probe.compare(session.probes[probe.id], afterData, ctx));
+    } finally {
+      await devServers.dispose();
     }
 
     const head = await headSha(repo);

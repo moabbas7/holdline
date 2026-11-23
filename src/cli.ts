@@ -11,6 +11,7 @@ import { pruneCommand } from './commands/prune.js';
 import { rollbackCommand } from './commands/rollback.js';
 import { undoRollbackCommand } from './commands/undoRollback.js';
 import { unlockCommand } from './commands/unlock.js';
+import { visualCommand } from './commands/visual.js';
 import { HoldlineError } from './core/errors.js';
 import { GitError } from './core/git.js';
 import { createCliIo } from './io.js';
@@ -110,6 +111,17 @@ program
   .action((route: string | undefined, o: { json?: boolean }) =>
     run(async () => {
       const result = await apiCommand(process.cwd(), { ...o, ...(route ? { route } : {}) }, createCliIo({ json: o.json }));
+      if (o.json) process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+    }),
+  );
+
+program
+  .command('visual [pages...]')
+  .description('load pages in headless Chromium (desktop + mobile): screenshots, console errors, failed requests, blank/error screens')
+  .option('--json', 'print the result as JSON on stdout')
+  .action((pages: string[], o: { json?: boolean }) =>
+    run(async () => {
+      const result = await visualCommand(process.cwd(), { ...o, pages }, createCliIo({ json: o.json }));
       if (o.json) process.stdout.write(JSON.stringify(result, null, 2) + '\n');
     }),
   );

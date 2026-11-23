@@ -8,6 +8,7 @@ import { writeCompactJson } from '../dependencies/store.js';
 import type { DepGraph } from '../dependencies/types.js';
 import type { Probe, ProbeReport } from '../types.js';
 import { compareApi } from './diff.js';
+import type { DevServerPool } from '../devServer.js';
 import { runLive } from './live.js';
 import { API_CAPTURE_VERSION, apiSettings, type ApiCapture, type ApiRef, type ApiSettings, type LiveCapture } from './types.js';
 
@@ -24,6 +25,8 @@ export interface CaptureOptions {
   live?: boolean;
   progress?: (msg: string) => void;
   signal?: AbortSignal;
+  /** Shared dev servers for this run. */
+  pool?: DevServerPool;
 }
 
 /** Static analysis of every route, plus live calls when configured. */
@@ -48,6 +51,7 @@ export async function captureApi(root: string, config: Config | null, opts: Capt
       ...(typeof db?.envVar === 'string' ? { dbEnvVar: db.envVar } : {}),
       ...(opts.progress ? { progress: opts.progress } : {}),
       ...(opts.signal ? { signal: opts.signal } : {}),
+      ...(opts.pool ? { pool: opts.pool } : {}),
     });
   }
   return { capture: { version: API_CAPTURE_VERSION, routes, live, warnings, stats }, graph };
@@ -108,7 +112,7 @@ export const apiProbe: Probe<ApiRef> = {
     ctx.io.progress('  API routes …');
     const started = Date.now();
     const known = recallGraph(ctx.root, ctx.snapshotSha);
-    const { capture, graph } = await captureApi(ctx.root, ctx.config, { live: true, progress: (m) => ctx.io.progress(m), ...(known ? { graph: known } : {}) });
+    const { capture, graph } = await captureApi(ctx.root, ctx.config, { live: true, progress: (m) => ctx.io.progress(m), ...(known ? { graph: known } : {}), ...(ctx.devServers ? { pool: ctx.devServers } : {}) });
     if (ctx.phase === 'after') lastAfter = { root: ctx.root, graph };
     const ref = await writeApiCapture(ctx.root, ctx.phase, capture);
     ctx.io.progressDone(ctx.io.c.dim(`API: ${describeApiCapture(capture)} (${((Date.now() - started) / 1000).toFixed(1)}s)`));

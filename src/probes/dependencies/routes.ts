@@ -50,6 +50,28 @@ export function nextFileRole(relInPkg: string): NextFileRole {
   return null;
 }
 
+/**
+ * URL pattern of a Next.js page file (app router `page.*` or pages router file), or null.
+ * `rel` may include a package prefix (`apps/web/app/about/page.tsx`).
+ */
+export function nextPagePattern(rel: string): string | null {
+  const ext = P.extname(rel);
+  const noExt = rel.slice(0, -ext.length);
+  const app = /(?:^|\/)(?:src\/)?app\/(.*)$/.exec(noExt) ?? (/^(?:src\/)?app\/(.*)$/.exec(noExt));
+  if (app && /(?:^|\/)page$/.test(noExt)) {
+    const segs = app[1]!.split('/');
+    segs.pop();
+    return segmentsToPattern(segs);
+  }
+  const pages = /(?:^|\/)(?:src\/)?pages\/(.*)$/.exec(noExt);
+  if (pages) {
+    const segs = pages[1]!.split('/');
+    if (segs[0] === 'api' || segs.at(-1)!.startsWith('_')) return null;
+    return segmentsToPattern(segs);
+  }
+  return null;
+}
+
 export function joinRoute(prefix: string, p: string): string {
   const segs = `${prefix}/${p}`.split('/').filter(Boolean);
   return '/' + segs.join('/');

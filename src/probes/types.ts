@@ -1,6 +1,7 @@
 import type { Config } from '../core/config.js';
 import type { RepoInfo } from '../core/git.js';
 import type { Io } from '../io.js';
+import type { DevServerPool } from './devServer.js';
 
 export interface ProbeContext {
   repo: RepoInfo;
@@ -12,6 +13,11 @@ export interface ProbeContext {
   /** Per-run directory under .holdline/runs/ for logs and artefacts. */
   runDir: string;
   io: Io;
+  /**
+   * Dev servers shared by the probes of one run (started at most once, killed when the run
+   * ends). Optional: a probe without one starts and stops its own.
+   */
+  devServers?: DevServerPool;
 }
 
 export type FindingKind = 'regression' | 'fixed' | 'still-failing' | 'change' | 'info';

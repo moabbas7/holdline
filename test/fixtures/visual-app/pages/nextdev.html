@@ -1,0 +1,19 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Next dev tools</title>
+<style>
+body { font-family: sans-serif; margin: 0; padding: 24px; background: #fafafa; color: #222; }
+.row { display: flex; gap: 16px; flex-direction: row; }
+.box { width: 160px; height: 120px; background: #4a7bd0; color: white; padding: 8px; }
+</style></head>
+<body>
+<h1>Next dev tools</h1>
+<div class="row"><div class="box">One</div><div class="box">Two</div><div class="box">Three</div></div>
+<p>Some ordinary text on the page so it is clearly not blank.</p>
+<nextjs-portal></nextjs-portal>
+<script>
+// Like Next.js 16 in dev: the error dialog is always in the DOM, hidden, next to the dev tools badge.
+document.querySelector('nextjs-portal').attachShadow({ mode: 'open' }).innerHTML =
+  '<div data-nextjs-dialog-overlay data-rendered="false" style="display:none"><div data-nextjs-dialog>Runtime Error</div></div>' +
+  '<div data-nextjs-toast style="position:fixed;left:20px;bottom:20px;width:110px;height:36px;background:#000"></div>';
+</script>
+</body></html>
