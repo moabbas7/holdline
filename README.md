@@ -17,6 +17,7 @@ holdline before --task "add pagination to /users"
 holdline after                                  # what went from passing to failing + changed files (exit 1 on regressions)
 holdline graph lib/db.ts                        # what depends on a file (check the blast radius before a change)
 holdline db                                     # the database schema (local database, read-only, or schema files)
+holdline api                                    # every API route: methods, status codes, JSON response/request shapes
 holdline rollback                               # restore the working tree to the "before" snapshot
 holdline undo-rollback                          # changed your mind: restore the state from just before the rollback
 ```
@@ -45,6 +46,7 @@ Each kind of check is a **probe** with `snapshot()` and `compare()` methods (`sr
 - `files`: files changed since the snapshot.
 - `dependencies`: a dependency graph of the project (see below).
 - `database`: the database schema (see below).
+- `api`: API routes, status codes and JSON shapes (see below).
 
 Adding a probe means adding a module and registering it in `src/probes/registry.ts`; the core stays unchanged. A probe can be disabled with `"probes": { "<id>": { "enabled": false } }` in `.holdline/config.json`.
 
@@ -101,6 +103,62 @@ Settings, all optional, in `.holdline/config.json`:
 ```
 
 By default all user schemas are read, except Supabase's own (`auth`, `storage`, `realtime`, …). Set `"connect": false` to use schema files only. `pg` and the SQL parser are loaded only for projects that have SQL schema files or a database connection. Live SQLite needs Node 22.13 or later; on older versions holdline uses the schema files.
+
+## API shapes
+
+The `api` probe records, for every API route the dependency graph finds (Next.js `app/**/route.ts` and `pages/api/**`, Express/Fastify/Hono-style routes including `app.use('/prefix', router)` mounts), which HTTP methods it handles, the status codes it can return and the shape of each JSON response: keys, types, optional vs required, nesting. Values are never recorded.
+
+**Static mode** (the default; no server, no install needed). Each route is read with the TypeScript type checker, using the nearest `tsconfig.json`/`jsconfig.json` (only route files are loaded; imports are resolved on demand):
+
+- Responses: `NextResponse.json(x, { status })`, `Response.json`, `new Response(JSON.stringify(x), init)`, redirects, `res.json`/`res.status(n).json`/`res.send`/`res.sendStatus`, Fastify `return x`/`reply.code(n).send(x)`, Hono `c.json(x, status)`. Typed values (`NextResponse.json<T>`, `NextApiResponse<T>`, typed variables) come from the checker, with JSON rules applied (`Date` → string, functions dropped, `undefined` → optional). Untyped object and array literals are read directly. Handlers wrapped in helpers (`withAuth(async (ctx) => …)`) and helpers that build the response are followed.
+- Methods: exported `GET`/`POST`/… in the app router; `req.method === 'POST'` / `switch (req.method)` branches in the pages router (a `405` for other methods isn't attributed to the listed ones).
+- Requests: route params, query parameters read (`searchParams.get('x')`, `req.query.x`, `c.req.query('x')`) and the JSON body: typed through annotations, `as T` or a zod-style schema's input type (`schema.parse(await req.json())`, so `.optional()`/`.default()` fields are optional), otherwise the field names destructured from it.
+- Anything it can't determine (an `any`, a handler built by an untyped package, a status held in a variable) is shown as **unknown**, never guessed, and never counts as a regression.
+
+`holdline after` reports, as **regressions** (exit 1):
+
+- a route, or a method of a route, removed while the dependency graph shows files still calling it;
+- a response field removed, or a field's type changed (including `null` added or removed);
+- a request body field that became required (optional → required, or a new required field) when something in the project calls that route with that method;
+- a method that no longer returns any 2xx response, or whose 2xx response was replaced by a 3xx/4xx/5xx.
+
+A change from one 2xx code to another (200 → 201) is a **change**, as are additions, removals nothing calls, new error statuses and request fields that became optional. Each regression lists the files and pages that call the route and, where it can follow the JSON from the call (`await res.json()`, `.then(r => r.json())`, `const { data } = useSWR(…)`, axios `data`, destructuring, `items.map(i => i.x)`), the exact lines that read the removed or changed field. When it can't follow it, lines that mention the field name are listed as "may read".
+
+`holdline api [route] [--json]` prints every route (or the ones matching `/api/users/42`) with its methods, statuses, response shapes and request shape. It works without `holdline init`.
+
+Results are cached in `.holdline/cache/` per route, keyed by the content of everything the route file imports plus declaration files, tsconfigs and the lockfile, so `after` only re-analyses routes the task could have affected. On dub (210 routes, 2,200 files, dependencies installed) a cold `holdline api` takes about 6 s; in `after`, the probe takes about 0.5 s when no route's imports changed and 2–5 s after an edit to a widely shared schema file. Projects without API routes never load the analyser.
+
+**Live mode** (opt-in, off by default). When `probes.api.live` lists requests, `before`, `after` and `holdline api` start your dev server, call exactly those requests and record the real status and JSON shape:
+
+```json
+"probes": {
+  "api": {
+    "live": {
+      "enabled": true,
+      "command": "npm run dev",
+      "requests": [
+        { "path": "/api/users" },
+        { "method": "POST", "path": "/api/users", "body": { "name": "Test" } }
+      ],
+      "headers": { "Authorization": "Bearer <dev token>" },
+      "startupTimeoutSec": 90,
+      "requestTimeoutSec": 60,
+      "allowNonLocalDatabase": false
+    }
+  }
+}
+```
+
+Safety rules:
+
+- Only listed requests are sent. Methods other than GET/HEAD are sent only when listed with a sample `body`. Paths must start with `/`, and redirects are never followed. Readiness is checked with a TCP connection, not an HTTP request.
+- Live mode refuses to start when `DATABASE_URL`, `POSTGRES_URL`, `DIRECT_URL`, `probes.database.envVar`, `SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_URL` (in the `.env` files the dev server loads, or in holdline's own environment) points at a non-local host, or at a host it can't identify, and says which variable and host. Same host rules as the database probe. Set `allowNonLocalDatabase: true` to allow it.
+- Cookies and auth headers are sent only when the config provides them, and are never stored or printed. Response values are never stored or printed either, only types; query values in paths are shown as `…`.
+- The server runs on a free port (`PORT` is set; `{port}` in `command` is replaced), in its own process group. The whole process tree is killed afterwards: on success, on errors, on a startup timeout and on Ctrl+C.
+
+Live results are compared like static ones (labelled `[live]`): a 2xx that became a non-2xx, removed fields and type changes are regressions. A field that is `null` in one run and a value in another is not a type change.
+
+Limits: response shapes built from a variable the checker sees as `any` (common when `node_modules` isn't installed) are unknown, as are statuses not written as numbers or constants; errors thrown and turned into responses by a wrapper are not listed (the output notes "errors thrown are handled elsewhere"); `res.statusCode = n` assignments aren't followed. Turn the probe off with `"probes": { "api": { "enabled": false } }`, and set `probes.api.timeoutSec` (default 60) to cap static analysis time; routes not reached in time are unknown.
 
 ## Development
 

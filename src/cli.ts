@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { Command, InvalidArgumentError } from 'commander';
 import { afterCommand } from './commands/after.js';
+import { apiCommand } from './commands/api.js';
 import { beforeCommand } from './commands/before.js';
 import { dbCommand } from './commands/db.js';
 import { graphCommand } from './commands/graph.js';
@@ -98,6 +99,17 @@ program
   .action((o: { json?: boolean }) =>
     run(async () => {
       const result = await dbCommand(process.cwd(), o, createCliIo({ json: o.json }));
+      if (o.json) process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+    }),
+  );
+
+program
+  .command('api [route]')
+  .description('show every API route with its methods, status codes and JSON shapes (static analysis; live if configured)')
+  .option('--json', 'print the result as JSON on stdout')
+  .action((route: string | undefined, o: { json?: boolean }) =>
+    run(async () => {
+      const result = await apiCommand(process.cwd(), { ...o, ...(route ? { route } : {}) }, createCliIo({ json: o.json }));
       if (o.json) process.stdout.write(JSON.stringify(result, null, 2) + '\n');
     }),
   );

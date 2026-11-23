@@ -275,6 +275,15 @@ export function extractSource(sf: SourceFile, tsm: TsMorph): FileFacts {
     const v = objProp(n, key);
     return v && (tsApi.isStringLiteral(v) || tsApi.isNoSubstitutionTemplateLiteral(v)) ? v.text : undefined;
   };
+  /** fetch() method: GET when there are no options or the options literal has no method key; undefined when dynamic. */
+  const fetchMethod = (opts: ts.Node | undefined): string | undefined => {
+    if (!opts) return 'GET';
+    if (!tsApi.isObjectLiteralExpression(opts)) return undefined;
+    if (opts.properties.some((p) => !tsApi.isPropertyAssignment(p) && !tsApi.isShorthandPropertyAssignment(p) && !tsApi.isMethodDeclaration(p))) return undefined;
+    const has = opts.properties.some((p) => p.name !== undefined && p.name.getText(raw).replace(/['"]/g, '') === 'method');
+    if (!has) return 'GET';
+    return strProp(opts, 'method')?.toUpperCase();
+  };
   const isUpper = (s: string) => s[0] !== undefined && s[0] >= 'A' && s[0] <= 'Z';
   const receiverText = (e: ts.Expression): string | null => {
     if (tsApi.isIdentifier(e)) return e.text;
@@ -306,7 +315,7 @@ export function extractSource(sf: SourceFile, tsm: TsMorph): FileFacts {
         if (p && tsApi.isVariableDeclaration(p) && tsApi.isIdentifier(p.name)) bindings.push([p.name.text, '*']);
         addImport({ spec: a0.text, names: [], bindings, kind: 'require', typeOnly: false, line: lineOf(call) });
       } else if (name === 'fetch') {
-        for (const url of urlsOf(a0)) facts.httpCalls.push({ client: 'fetch', method: strProp(args[1], 'method')?.toUpperCase(), url, line: lineOf(call) });
+        for (const url of urlsOf(a0)) facts.httpCalls.push({ client: 'fetch', method: fetchMethod(args[1]), url, line: lineOf(call) });
       } else if (SWR_HOOKS.has(name)) {
         for (const url of urlsOf(a0)) facts.httpCalls.push({ client: 'swr', method: 'GET', url, line: lineOf(call) });
       } else if (name === 'axios') {
@@ -323,7 +332,7 @@ export function extractSource(sf: SourceFile, tsm: TsMorph): FileFacts {
     const recv = receiverText(obj);
 
     if (method === 'fetch' && (recv === 'window' || recv === 'globalThis' || recv === 'self')) {
-      for (const url of urlsOf(a0)) facts.httpCalls.push({ client: 'fetch', method: strProp(args[1], 'method')?.toUpperCase(), url, line: lineOf(call) });
+      for (const url of urlsOf(a0)) facts.httpCalls.push({ client: 'fetch', method: fetchMethod(args[1]), url, line: lineOf(call) });
       return;
     }
 

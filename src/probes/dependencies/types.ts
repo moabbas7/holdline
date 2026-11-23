@@ -1,5 +1,5 @@
 /** Bumped whenever extraction output changes, so cached facts are re-parsed. */
-export const EXTRACTOR_VERSION = 2;
+export const EXTRACTOR_VERSION = 3;
 
 export type ImportKind = 'import' | 'reexport' | 'require' | 'dynamic';
 
@@ -145,14 +145,35 @@ export interface GraphStats {
   ms: number;
 }
 
+/** Where a route is handled: a Next.js route file, a pages/api file, or a server route definition. */
+export interface RouteHandler {
+  file: string;
+  kind: 'next-app' | 'next-pages' | 'server';
+  /** For 'server': the HTTP method of the definition ('*' for app.all) and its line. */
+  method?: string;
+  line?: number;
+}
+
+/** An HTTP call to one of this project's URLs, with the routes it matched (empty when none). */
+export interface ApiCall {
+  file: string;
+  url: string;
+  /** Upper-case method when known (fetch without options is GET). */
+  method?: string;
+  line: number;
+  routes: string[];
+}
+
 export interface DepGraph {
   version: 1;
   files: Record<string, { hash: string; role: FileRole }>;
-  routes: Record<string, { files: string[]; methods: string[] }>;
+  routes: Record<string, { files: string[]; methods: string[]; handlers?: RouteHandler[] }>;
   tables: Record<string, { definedIn: string[] }>;
   edges: Edge[];
   broken: BrokenImport[];
   unmatchedCalls: { file: string; url: string; line: number }[];
+  /** Every call to a project URL (graphs written before phase 4 lack it). */
+  apiCalls?: ApiCall[];
   stats: GraphStats;
 }
 

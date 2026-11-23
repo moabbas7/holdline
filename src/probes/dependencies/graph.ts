@@ -13,8 +13,10 @@ import {
   tableId,
   type BrokenImport,
   type DepGraph,
+  type ApiCall,
   type Edge,
   type FileFacts,
+  type RouteHandler,
   type ImportFact,
 } from './types.js';
 import { loadPackageJsons, workspacePackages } from './workspaces.js';
@@ -40,6 +42,18 @@ class EdgeSet {
     this.keys.add(k);
     this.list.push(e);
   }
+}
+
+/** The last graph built per snapshot, so other probes in the same run can reuse it. */
+let remembered: { root: string; snapshotSha: string; graph: DepGraph } | null = null;
+
+export function rememberGraph(root: string, snapshotSha: string, graph: DepGraph): void {
+  remembered = { root, snapshotSha, graph };
+}
+
+/** The graph the dependencies probe built for this exact snapshot in this process, if any. */
+export function recallGraph(root: string, snapshotSha: string): DepGraph | null {
+  return remembered && remembered.root === root && remembered.snapshotSha === snapshotSha ? remembered.graph : null;
 }
 
 /** Build the dependency graph of the working tree at `root`. */
@@ -126,12 +140,13 @@ export async function buildGraph(root: string, opts: BuildOptions = {}): Promise
   }
 
   // --- 3. Pages, Next.js API routes, server actions ------------------------------------
-  const routes = new Map<string, { files: Set<string>; methods: Set<string> }>();
-  const addRoute = (pattern: string, file: string, methods: string[]) => {
+  const routes = new Map<string, { files: Set<string>; methods: Set<string>; handlers: RouteHandler[] }>();
+  const addRoute = (pattern: string, file: string, methods: string[], handler: RouteHandler) => {
     let r = routes.get(pattern);
-    if (!r) routes.set(pattern, (r = { files: new Set(), methods: new Set() }));
+    if (!r) routes.set(pattern, (r = { files: new Set(), methods: new Set(), handlers: [] }));
     r.files.add(file);
     for (const m of methods) r.methods.add(m);
+    if (!r.handlers.some((h) => h.file === handler.file && h.line === handler.line && h.method === handler.method)) r.handlers.push(handler);
     files[file]!.role = 'api-route';
   };
   const nextRoots = [...packages]
@@ -145,7 +160,11 @@ export async function buildGraph(root: string, opts: BuildOptions = {}): Promise
     const nextRoot = nextRoots.find((r) => r === '' || file.startsWith(r + '/'));
     if (nextRoot !== undefined) {
       const role = nextFileRole(nextRoot === '' ? file : file.slice(nextRoot.length + 1));
-      if (role?.kind === 'api') addRoute(role.pattern, file, f.exports.filter((e) => NEXT_METHODS.includes(e)));
+      if (role?.kind === 'api') {
+        const rel = nextRoot === '' ? file : file.slice(nextRoot.length + 1);
+        const kind = /^(?:src\/)?pages\//.test(rel) ? 'next-pages' : 'next-app';
+        addRoute(role.pattern, file, f.exports.filter((e) => NEXT_METHODS.includes(e)), { file, kind });
+      }
       else if (role?.kind === 'page') files[file]!.role = 'page';
     }
     if (f.useServer && files[file]!.role === 'module') files[file]!.role = 'server-action';
@@ -172,16 +191,16 @@ export async function buildGraph(root: string, opts: BuildOptions = {}): Promise
     return name !== undefined ? tf.axiosInstances[name] : undefined;
   };
 
-  const calls: { file: string; url: string; line: number }[] = [];
-  const routeDefs: { file: string; receiver: string; method: string; url: string }[] = [];
+  const calls: { file: string; url: string; line: number; method?: string }[] = [];
+  const routeDefs: { file: string; receiver: string; method: string; url: string; line: number }[] = [];
   for (const [file, f] of facts) {
-    for (const c of f.httpCalls) calls.push({ file, url: c.url, line: c.line });
+    for (const c of f.httpCalls) calls.push({ file, url: c.url, line: c.line, ...(c.method ? { method: c.method } : {}) });
     for (const mc of f.methodCalls) {
       const base = axiosBase(file, mc.receiver);
       if (base !== undefined) {
-        calls.push({ file, url: joinUrl(base, mc.url), line: mc.line });
+        calls.push({ file, url: joinUrl(base, mc.url), line: mc.line, ...(mc.method !== 'request' ? { method: mc.method.toUpperCase() } : {}) });
       } else if (mc.pathLike && mc.hasHandlerArg && (f.serverFramework || ROUTER_RECEIVER.test(mc.receiver))) {
-        routeDefs.push({ file, receiver: mc.receiver, method: mc.method.toUpperCase(), url: mc.url });
+        routeDefs.push({ file, receiver: mc.receiver, method: mc.method.toUpperCase(), url: mc.url, line: mc.line });
       }
     }
   }
@@ -218,11 +237,17 @@ export async function buildGraph(root: string, opts: BuildOptions = {}): Promise
   };
   for (const d of routeDefs) {
     for (const prefix of prefixesFor(d.file, d.receiver, 0)) {
-      addRoute(joinRoute(prefix, d.url), d.file, d.method === 'ALL' ? [] : [d.method]);
+      addRoute(joinRoute(prefix, d.url), d.file, d.method === 'ALL' ? [] : [d.method], {
+        file: d.file,
+        kind: 'server',
+        method: d.method === 'ALL' ? '*' : d.method,
+        line: d.line,
+      });
     }
   }
 
   const unmatchedCalls: DepGraph['unmatchedCalls'] = [];
+  const apiCalls: ApiCall[] = [];
   const patterns = [...routes.keys()];
   for (const c of calls) {
     let best = -1;
@@ -239,8 +264,10 @@ export async function buildGraph(root: string, opts: BuildOptions = {}): Promise
     // A call with no literal path segment (`${base}/${key}`) could be anything, and one that
     // ties between many routes is too ambiguous to link: report both as unmatched.
     const literal = c.url.split('/').some((s) => s !== '' && s !== ':param');
-    if (best < 0 || !literal || matches.length > MAX_AMBIGUOUS_MATCHES) {
-      unmatchedCalls.push(c);
+    const unmatched = best < 0 || !literal || matches.length > MAX_AMBIGUOUS_MATCHES;
+    if (literal) apiCalls.push({ file: c.file, url: c.url, ...(c.method ? { method: c.method } : {}), line: c.line, routes: unmatched ? [] : [...matches].sort() });
+    if (unmatched) {
+      unmatchedCalls.push({ file: c.file, url: c.url, line: c.line });
       continue;
     }
     for (const p of matches) edges.add({ from: c.file, to: routeId(p), type: 'calls-api', line: c.line });
@@ -328,7 +355,8 @@ export async function buildGraph(root: string, opts: BuildOptions = {}): Promise
   const routeRecord: DepGraph['routes'] = {};
   for (const p of [...routes.keys()].sort()) {
     const r = routes.get(p)!;
-    routeRecord[p] = { files: [...r.files].sort(), methods: [...r.methods].sort() };
+    const handlers = [...r.handlers].sort((x, y) => x.file.localeCompare(y.file) || (x.line ?? 0) - (y.line ?? 0));
+    routeRecord[p] = { files: [...r.files].sort(), methods: [...r.methods].sort(), handlers };
   }
   const tableRecord: DepGraph['tables'] = {};
   for (const t of [...tables.keys()].sort()) tableRecord[t] = { definedIn: [...tables.get(t)!].sort() };
@@ -341,6 +369,7 @@ export async function buildGraph(root: string, opts: BuildOptions = {}): Promise
     edges: edges.list,
     broken,
     unmatchedCalls,
+    apiCalls,
     stats: {
       files: Object.keys(files).length,
       edges: edges.list.length,

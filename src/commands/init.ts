@@ -20,6 +20,9 @@ function showConfig(config: Config, io: Io): void {
   io.log(`  Dependency map:   ${deps ? io.c.bold('enabled') : io.c.dim('(disabled)')}`);
   const db = config.probes?.database?.enabled !== false;
   io.log(`  Database schema:  ${db ? io.c.bold('enabled') : io.c.dim('(disabled)')}`);
+  const api = config.probes?.api?.enabled !== false;
+  const live = (config.probes?.api as { live?: { enabled?: boolean } } | undefined)?.live?.enabled === true;
+  io.log(`  API shapes:       ${api ? io.c.bold('enabled') + (live ? ' (static + live)' : ' (static)') : io.c.dim('(disabled)')}`);
 }
 
 export async function initCommand(cwd: string, opts: InitOptions, io: Io): Promise<Config> {
