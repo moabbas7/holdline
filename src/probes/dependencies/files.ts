@@ -23,6 +23,22 @@ const SKIP_DIRS = new Set([
 
 export const MAX_FILE_BYTES = 1024 * 1024;
 
+/**
+ * Decode source text, honouring a byte-order mark: some generated files (e.g. Supabase
+ * types written by PowerShell redirection) are UTF-16, and reading them as UTF-8 loses
+ * every export.
+ */
+export function decodeText(buf: Buffer): string {
+  if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe) return buf.subarray(2).toString('utf16le');
+  if (buf.length >= 2 && buf[0] === 0xfe && buf[1] === 0xff) {
+    const swapped = Buffer.from(buf.subarray(2));
+    swapped.swap16();
+    return swapped.toString('utf16le');
+  }
+  if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) return buf.subarray(3).toString('utf8');
+  return buf.toString('utf8');
+}
+
 export type FileKind = 'source' | 'sql' | 'prisma';
 
 export function fileKind(p: string): FileKind | null {

@@ -75,6 +75,20 @@ describe('helpers', () => {
   });
 });
 
+describe('file encodings', () => {
+  it('reads UTF-16 files with a byte-order mark (e.g. generated Supabase types)', async () => {
+    const t = makeRepo();
+    t.write('types_db.ts', Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('export type Tables = { id: string };\nexport interface Database {}\n', 'utf16le')]));
+    t.write('src/use.ts', "import type { Tables, Database } from '../types_db';\nexport type T = Tables | Database;\n");
+    t.write('src/bom8.ts', Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from("export const x = 1;\n")]));
+    t.write('src/use8.ts', "import { x } from './bom8';\nexport const y = x;\n");
+    t.commitAll('encodings');
+    const g = await buildGraph(t.dir);
+    expect(g.broken).toEqual([]);
+    expect(has(g, 'src/use.ts', 'types_db.ts', 'import')).toBe(true);
+  });
+});
+
 describe('graph: Next.js + Supabase fixture', () => {
   it('links pages, API routes, server actions and tables', async () => {
     const t = fixtureRepo('next-supabase');
@@ -369,7 +383,7 @@ describe('probe: config and storage', () => {
     const t = fixtureRepo('next-supabase');
     await initCommand(t.dir, { yes: true }, fakeIo());
     const config = await loadConfig(t.dir);
-    expect(config.probes).toEqual({ dependencies: { enabled: true } });
+    expect(config.probes).toEqual({ dependencies: { enabled: true }, database: { enabled: true } });
     expect(dependenciesProbe.enabled(config)).toBe(true);
   });
 

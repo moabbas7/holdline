@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { extractPrisma, extractSource, extractSql } from './extract.js';
-import { MAX_FILE_BYTES, type FileKind } from './files.js';
+import { decodeText, MAX_FILE_BYTES, type FileKind } from './files.js';
 import { depsPaths, exists, writeCompactJson } from './store.js';
 import { EXTRACTOR_VERSION, emptyFacts, type FileFacts } from './types.js';
 
@@ -64,7 +64,7 @@ export async function loadFacts(
     const hash = createHash('sha256').update(buf).digest('hex');
     hashes.set(rel, hash.slice(0, 20));
     keys.set(rel, `${extOf(rel)}:${hash}`);
-    if (!cache.entries[`${extOf(rel)}:${hash}`]) texts.set(rel, buf.toString('utf8'));
+    if (!cache.entries[`${extOf(rel)}:${hash}`]) texts.set(rel, decodeText(buf));
   });
 
   const facts = new Map<string, FileFacts>();

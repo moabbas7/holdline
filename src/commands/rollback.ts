@@ -4,6 +4,8 @@ import { writeRollback } from '../core/session.js';
 import { planIsEmpty } from '../core/snapshot.js';
 import { loadConfig } from '../core/config.js';
 import type { Io } from '../io.js';
+import { enabledProbes } from '../probes/registry.js';
+import type { RollbackContext } from '../probes/types.js';
 import { describePlan, locked, preflightLargeFiles, requireConfirmation, short } from './common.js';
 import { requireSession } from './after.js';
 
@@ -42,6 +44,24 @@ export async function rollbackCommand(cwd: string, opts: RollbackOptions, io: Io
     const session = await requireSession(root);
     await preflightLargeFiles(project, config.largeUntrackedWarnMB, io, { yes: opts.yes, canCancel: true });
 
+    // State a rollback does not restore (a live database), shown before confirming.
+    const ctx: RollbackContext = { repo, root, config, io };
+    const warnings: string[] = [];
+    for (const probe of enabledProbes(config)) {
+      if (!probe.rollbackWarnings || !(probe.id in session.probes)) continue;
+      try {
+        warnings.push(...(await probe.rollbackWarnings(session.probes[probe.id], ctx)));
+      } catch {
+        /* a probe's warning must never block a rollback */
+      }
+    }
+    const showWarnings = () => {
+      if (warnings.length === 0) return;
+      io.log();
+      for (const line of warnings) io.warn(line);
+      io.log();
+    };
+
     let nothingToDo = false;
     const outcome = await restoreWithSafety(repo, session.snapshot.sha, 'pre-rollback', {
       confirm: async (plan) => {
@@ -52,6 +72,7 @@ export async function rollbackCommand(cwd: string, opts: RollbackOptions, io: Io
         io.log(`Roll back to the snapshot taken before "${session.task}" (${short(session.snapshot.sha)}):`);
         for (const line of describePlan(plan, io)) io.log(`  ${line}`);
         io.log(io.c.dim('  The current state is saved first; `holdline undo-rollback` brings it back.'));
+        showWarnings();
         return requireConfirmation(io, 'Roll back now?', { yes: opts.yes });
       },
       onSafetyRecorded: async (safety) => {
@@ -67,6 +88,7 @@ export async function rollbackCommand(cwd: string, opts: RollbackOptions, io: Io
 
     if (nothingToDo) {
       io.log('The working tree already matches the "before" snapshot. Nothing to roll back.');
+      showWarnings();
       return null;
     }
     if (!outcome) throw new CancelledError();

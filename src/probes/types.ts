@@ -34,6 +34,14 @@ export interface ProbeReport {
   findings: Finding[];
 }
 
+/** Context for Probe.rollbackWarnings (no snapshot is taken for a rollback). */
+export interface RollbackContext {
+  repo: RepoInfo;
+  root: string;
+  config: Config;
+  io: Io;
+}
+
 /**
  * A probe captures one aspect of the project (check results, file list, and in later
  * phases dependency maps, DB schemas, API shapes, screenshots) and compares two captures.
@@ -45,4 +53,9 @@ export interface Probe<S = unknown> {
   enabled(config: Config): boolean;
   snapshot(ctx: ProbeContext): Promise<S>;
   compare(before: S, after: S, ctx: ProbeContext): Promise<ProbeReport>;
+  /**
+   * Optional: lines to show before `holdline rollback` asks for confirmation, about state
+   * a rollback does NOT restore (e.g. a live database). Receives this probe's "before" data.
+   */
+  rollbackWarnings?(before: S, ctx: RollbackContext): Promise<string[]>;
 }

@@ -1,5 +1,5 @@
 /** Bumped whenever extraction output changes, so cached facts are re-parsed. */
-export const EXTRACTOR_VERSION = 1;
+export const EXTRACTOR_VERSION = 2;
 
 export type ImportKind = 'import' | 'reexport' | 'require' | 'dynamic';
 

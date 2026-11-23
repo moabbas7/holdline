@@ -134,7 +134,7 @@ export async function detectProject(root: string): Promise<Detection> {
       packageManager,
       largeUntrackedWarnMB: DEFAULT_LARGE_UNTRACKED_MB,
       checks,
-      probes: { dependencies: { enabled: true } },
+      probes: { dependencies: { enabled: true }, database: { enabled: true } },
     },
     notes,
   };

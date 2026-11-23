@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { Command, InvalidArgumentError } from 'commander';
 import { afterCommand } from './commands/after.js';
 import { beforeCommand } from './commands/before.js';
+import { dbCommand } from './commands/db.js';
 import { graphCommand } from './commands/graph.js';
 import { initCommand } from './commands/init.js';
 import { pruneCommand } from './commands/prune.js';
@@ -86,6 +87,17 @@ program
   .action((target: string, o: { json?: boolean }) =>
     run(async () => {
       const result = await graphCommand(process.cwd(), target, o, createCliIo({ json: o.json }));
+      if (o.json) process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+    }),
+  );
+
+program
+  .command('db')
+  .description('show the database schema (live local database, read-only, or schema files) and where it came from')
+  .option('--json', 'print the schema as JSON on stdout')
+  .action((o: { json?: boolean }) =>
+    run(async () => {
+      const result = await dbCommand(process.cwd(), o, createCliIo({ json: o.json }));
       if (o.json) process.stdout.write(JSON.stringify(result, null, 2) + '\n');
     }),
   );

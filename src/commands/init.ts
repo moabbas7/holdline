@@ -18,6 +18,8 @@ function showConfig(config: Config, io: Io): void {
   }
   const deps = config.probes?.dependencies?.enabled !== false;
   io.log(`  Dependency map:   ${deps ? io.c.bold('enabled') : io.c.dim('(disabled)')}`);
+  const db = config.probes?.database?.enabled !== false;
+  io.log(`  Database schema:  ${db ? io.c.bold('enabled') : io.c.dim('(disabled)')}`);
 }
 
 export async function initCommand(cwd: string, opts: InitOptions, io: Io): Promise<Config> {
