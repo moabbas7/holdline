@@ -12,6 +12,8 @@ export interface PageConfig {
   path: string;
   /** Extra CSS selectors to mask on this page. */
   mask: string[];
+  /** The configured path when it was a template ("/[locale]/pricing"). */
+  template?: string;
 }
 
 export interface VisualSettings {
@@ -37,6 +39,12 @@ export interface VisualSettings {
   /** Full-page screenshots are clipped to this height. */
   maxHeight: number;
   allowNonLocalDatabase: boolean;
+  /** Sample values for dynamic segments: { locale: "en", id: "1" }. */
+  params: Record<string, string>;
+  /** Pages whose template needs a value that `params` doesn't give (not checked). */
+  unresolved: { template: string; missing: string[] }[];
+  /** Report a visual difference on a page outside the task's scope as a regression. */
+  failOnUnexpectedChange: boolean;
 }
 
 export interface Rect {
@@ -138,17 +146,85 @@ export function normalisePagePath(p: string): string | null {
   return t.startsWith('/') ? t : `/${t}`;
 }
 
+const DYNAMIC_SEGMENT = /^(?:\[\[\.\.\.([^\]]+)\]\]|\[\.\.\.([^\]]+)\]|\[([^\]]+)\]|:([A-Za-z_]\w*)(\*|\?)?)$/;
+
+/** Is this page path a template with dynamic segments ([id], [...slug], [[...slug]], :id)? */
+export function isPageTemplate(p: string): boolean {
+  return p.split('/').some((seg) => DYNAMIC_SEGMENT.test(seg));
+}
+
+/** Names of the dynamic segments of a template, with whether each may be left empty. */
+export function templateParams(p: string): { name: string; optional: boolean; catchAll: boolean }[] {
+  const out: { name: string; optional: boolean; catchAll: boolean }[] = [];
+  for (const seg of p.split('/')) {
+    const m = DYNAMIC_SEGMENT.exec(seg);
+    if (!m) continue;
+    if (m[1]) out.push({ name: m[1], optional: true, catchAll: true });
+    else if (m[2]) out.push({ name: m[2], optional: false, catchAll: true });
+    else if (m[3]) out.push({ name: m[3], optional: false, catchAll: false });
+    else out.push({ name: m[4]!, optional: m[5] === '?', catchAll: m[5] === '*' });
+  }
+  return out;
+}
+
+/**
+ * Fill a page template with sample values. A catch-all value may hold several segments
+ * ("docs/intro"); an optional catch-all without a value is dropped.
+ */
+export function resolvePageTemplate(p: string, params: Record<string, string>): { path: string } | { missing: string[] } {
+  const missing: string[] = [];
+  const out: string[] = [];
+  for (const seg of p.split('/')) {
+    const m = DYNAMIC_SEGMENT.exec(seg);
+    if (!m) {
+      out.push(seg);
+      continue;
+    }
+    const name = m[1] ?? m[2] ?? m[3] ?? m[4]!;
+    const optional = Boolean(m[1]) || m[5] === '?';
+    const catchAll = Boolean(m[1] || m[2]) || m[5] === '*';
+    const v = params[name];
+    if (v === undefined || v === '') {
+      if (optional) continue;
+      missing.push(name);
+      continue;
+    }
+    const parts = catchAll ? v.split('/').filter(Boolean) : [v];
+    out.push(...parts.map((x) => encodeURIComponent(x)));
+  }
+  if (missing.length) return { missing };
+  return { path: out.join('/') || '/' };
+}
+
 /** Parse probes.visual from the config; api live settings provide server defaults. */
 export function visualSettings(raw: Record<string, unknown> | undefined, apiLive?: Record<string, unknown>): VisualSettings {
   const r = raw ?? {};
+  const params: Record<string, string> = {};
+  if (r.params && typeof r.params === 'object' && !Array.isArray(r.params)) {
+    for (const [k, v] of Object.entries(r.params as Record<string, unknown>)) {
+      if (typeof v === 'string' || typeof v === 'number') params[k] = String(v);
+    }
+  }
   const pages: PageConfig[] = [];
+  const unresolved: VisualSettings['unresolved'] = [];
   const seen = new Set<string>();
   for (const p of Array.isArray(r.pages) ? r.pages : []) {
     const pathStr = typeof p === 'string' ? p : p && typeof p === 'object' && typeof (p as { path?: unknown }).path === 'string' ? (p as { path: string }).path : null;
-    const norm = pathStr ? normalisePagePath(pathStr) : null;
-    if (!norm || seen.has(norm)) continue;
+    let norm = pathStr ? normalisePagePath(pathStr) : null;
+    if (!norm) continue;
+    let template: string | undefined;
+    if (isPageTemplate(norm)) {
+      const res = resolvePageTemplate(norm, params);
+      if ('missing' in res) {
+        unresolved.push({ template: norm, missing: res.missing });
+        continue;
+      }
+      template = norm;
+      norm = res.path;
+    }
+    if (seen.has(norm)) continue;
     seen.add(norm);
-    pages.push({ path: norm, mask: typeof p === 'object' ? strs((p as { mask?: unknown }).mask) : [] });
+    pages.push({ path: norm, mask: typeof p === 'object' ? strs((p as { mask?: unknown }).mask) : [], ...(template ? { template } : {}) });
   }
   const vp = (r.viewports && typeof r.viewports === 'object' ? r.viewports : {}) as Record<string, unknown>;
   const command = typeof r.command === 'string' ? r.command : typeof apiLive?.command === 'string' ? apiLive.command : undefined;
@@ -167,6 +243,9 @@ export function visualSettings(raw: Record<string, unknown> | undefined, apiLive
     noiseDelayMs: num(r.noiseDelayMs, 1000),
     maxHeight: Math.max(200, num(r.maxHeight, 4000)),
     allowNonLocalDatabase: r.allowNonLocalDatabase === true,
+    params,
+    unresolved,
+    failOnUnexpectedChange: r.failOnUnexpectedChange === true,
   };
 }
 

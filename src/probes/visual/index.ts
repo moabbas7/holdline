@@ -164,6 +164,9 @@ export const visualProbe: Probe<VisualRef> = {
   async snapshot(ctx) {
     const started = Date.now();
     const settings = visualSettingsFrom(ctx.config);
+    for (const u of settings.unresolved) {
+      ctx.io.warn(`Visual check: skipping ${u.template}: no sample value for ${u.missing.map((m) => `[${m}]`).join(', ')}. Set probes.visual.params (e.g. { "${u.missing[0]}": "…" }) in .holdline/config.json.`);
+    }
     ctx.io.progress('  visual check …');
     let before: PageResult[] | undefined;
     if (ctx.phase === 'after') {

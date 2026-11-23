@@ -59,5 +59,51 @@ export async function findConnectionString(root: string, extraVar?: string): Pro
       if (value) return { envVar: v, envFile: file, value };
     }
   }
-  return null;
+  return findLocalSupabase(root);
+}
+
+export const SUPABASE_CONFIG = 'supabase/config.toml';
+/** The Supabase CLI's default local database port. */
+export const SUPABASE_DEFAULT_DB_PORT = 54322;
+
+/**
+ * `[db] port` from supabase/config.toml (only the keys holdline needs; not a full TOML parser).
+ * Returns null without a [db] section or with a port that isn't a number.
+ */
+export function supabaseDbPort(toml: string): number | null {
+  let section = '';
+  let sawDb = false;
+  for (const raw of toml.replace(/\r\n?/g, '\n').split('\n')) {
+    const line = raw.replace(/\s+#.*$/, '').trim();
+    if (!line || line.startsWith('#')) continue;
+    const sec = /^\[\s*([^\]]+?)\s*\]$/.exec(line);
+    if (sec) {
+      section = sec[1]!;
+      if (section === 'db') sawDb = true;
+      continue;
+    }
+    if (section !== 'db') continue;
+    const kv = /^port\s*=\s*["']?(\d+)["']?$/.exec(line);
+    if (kv) {
+      const port = Number(kv[1]);
+      return port > 0 && port < 65536 ? port : null;
+    }
+  }
+  return sawDb ? SUPABASE_DEFAULT_DB_PORT : null;
+}
+
+/**
+ * A project with supabase/config.toml and no URL in .env uses the local Supabase stack: its
+ * database listens on 127.0.0.1 at `[db] port` with the CLI's fixed local credentials.
+ * The URL goes through the same parsing and local-host checks as any other.
+ */
+export async function findLocalSupabase(root: string): Promise<FoundUrl | null> {
+  let toml: string;
+  try {
+    toml = await readFile(path.join(root, SUPABASE_CONFIG), 'utf8');
+  } catch {
+    return null;
+  }
+  const port = supabaseDbPort(toml) ?? SUPABASE_DEFAULT_DB_PORT;
+  return { envVar: 'local Supabase ([db] port)', envFile: SUPABASE_CONFIG, value: `postgresql://postgres:postgres@127.0.0.1:${port}/postgres` };
 }

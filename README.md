@@ -12,9 +12,10 @@ Requires Node ≥ 20.17 and git.
 
 ```sh
 holdline init                                   # detect project type + build/typecheck/lint/test commands
-holdline before --task "add pagination to /users"
+holdline before --task "add pagination to /users"   # optionally --scope "app/users/**" (repeatable)
 # … let the agent work …
-holdline after                                  # what went from passing to failing + changed files (exit 1 on regressions)
+holdline after                                  # what broke or changed, outside the task first (exit 1 on regressions)
+holdline report                                 # open the HTML report of the last `after` (--list for older ones)
 holdline graph lib/db.ts                        # what depends on a file (check the blast radius before a change)
 holdline db                                     # the database schema (local database, read-only, or schema files)
 holdline api                                    # every API route: methods, status codes, JSON response/request shapes
@@ -27,13 +28,53 @@ Other commands:
 
 - `holdline prune --keep <n> [--dry-run]` deletes old snapshot history. The newest 20 are kept automatically after each `before`. Snapshots still in use (the session, `after`, `pre-rollback`, `pre-undo`) are never pruned.
 - `holdline unlock` removes a leftover lock file. Commands take `.holdline/lock` so only one runs at a time, and a lock from a dead process is cleared automatically. You only need `unlock` for a lock left on another machine (for example a shared folder).
-- `holdline after --json` prints a machine-readable report.
+- `holdline after --all` also lists the changes inside the task area (collapsed to a count by default).
+- `holdline after --json` prints a machine-readable report with a documented, versioned schema: [docs/report-schema.md](docs/report-schema.md).
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success. For `after`: nothing went from passing to failing. |
+| `1` | `after` found at least one regression, in any scope (outside the task, expected ripple or inside it). |
+| `2` | holdline couldn't do what was asked: not a git repo, no config or session, a lock held by another command, an invalid argument. |
+| `3` | An unexpected internal error (a bug in holdline; the stack trace is printed). |
+| `130` | Cancelled at a prompt (Ctrl+C or answering no). Nothing was changed. |
+
+## Task scope and the report
+
+`holdline after` sorts every finding by how it relates to the task, and says why in one line (`why: …`):
+
+- **Outside the task**: things the task wasn't about. These come first, ranked: confirmed regressions (checks that went from passing to failing, broken imports), then database and API breaks, then visual problems, then changes.
+- **Expected ripple**: direct dependents of files changed for the task. For example, the files that import a shared helper the agent changed, the callers of an API route whose handler changed, or the code that uses a table a task migration altered. Re-exports are followed by name: when `timeAgo` in `packages/utils/src/functions/time-ago.ts` changes, the files that import `timeAgo` from `@dub/utils` (through its `index.ts` barrels) are ripple, and the files that import other helpers from the same package are not. Pages and layouts that render one of those files are ripple too.
+- **In the task area**: collapsed to a count (`holdline after --all` lists them). A regression inside the task area is always shown.
+
+It ends with a summary of one to three lines and the exact rollback command, and writes an HTML report to `.holdline/reports/<timestamp>.html`. The HTML report is a single file with no scripts and no external resources, and screenshots and diffs are embedded, so it works offline and can be attached anywhere. `holdline report` opens the latest one, `holdline report --list` lists older ones and `holdline report <n>` opens one of them (`--no-open` only prints the path).
+
+**How scope is decided** (deterministic and local; no AI or network calls):
+
+1. **The task text** is matched against the project when `before` runs:
+   - paths (`lib/db.ts`, `app/users/`);
+   - routes (`/users`, `/api/users/:id`), matched to API route handlers and Next.js pages;
+   - component and identifier names (`UserCard`, `formatDate`), matched to file names;
+   - table names;
+   - plain words and phrases, matched to file and folder names (`link card` matches `link-card.tsx`).
+
+   Plurals are folded, and grammar words and generic words like "page" or "button" are ignored on their own. A word that matches more than 2% of the project's files (at least 12) is too generic to say where the task is and is ignored. `before` prints what matched (`Task scope: "users" → 4 files`).
+2. **`--scope "<glob>"`** (repeatable on `before`) adds files explicitly. A plain folder (`--scope lib`) covers everything under it.
+3. **The files the agent edited** join the task area when they match the task's terms, sit next to a task file in a small folder (10 source files or fewer), import or are imported by a task file, or are new helpers imported by such a file. An edit to an unrelated component in a large shared folder like `components/` stays **outside**. When nothing in the task text matches and there are no globs, the agent's edits are taken as the task area.
+
+A finding is placed by what it is about: files, pages (through the Next.js page file and its layouts), API routes (through their handler) or tables. A regression is placed as far out as the code it breaks. For example, a dropped column of a task table that a file outside the task still reads is outside scope. A failing check is placed by the files its output names; when the output names no project file, it is shown outside scope so it is never hidden.
+
+**Visual differences** on a page outside the task are reported as an **unexpected visual change**. They are still a change, not a regression, unless you set `"probes": { "visual": { "failOnUnexpectedChange": true } }`.
 
 ## What a snapshot covers
 
 Snapshots include tracked files (with uncommitted edits), untracked files, deletions, file modes and symlinks, plus what was staged. They are plain git commits built through a temporary index, so they work in linked worktrees too; each worktree has its own namespace under `refs/holdline/`.
 
-**Git-ignored files are not covered** (`node_modules/`, an ignored `.env`, build output). Rollback leaves them alone. If an ignored file or directory sits exactly where a restored file must go, it is moved to `.holdline/displaced/` rather than deleted.
+**Git-ignored files are not covered** (`node_modules/`, an ignored `.env`, build output). Rollback leaves them alone.
+
+**Build output that isn't git-ignored.** `before` takes its snapshot first and then runs your checks, so files a build writes (an `out/` folder, generated types) appear after the snapshot. holdline records every file its own checks created or changed during `before`. In `after`, a file whose content still matches is not counted as an agent change. If the agent edited it since, it is counted, and its `why` line says so. `before` and `after` suggest the `.gitignore` lines to add. If an ignored file or directory sits exactly where a restored file must go, it is moved to `.holdline/displaced/` rather than deleted.
 
 Before snapshotting, holdline warns when untracked, non-ignored files add up to more than 100 MB (`largeUntrackedWarnMB` in the config) and lists the biggest ones. Those are usually build artefacts or data that belong in `.gitignore`.
 
@@ -73,7 +114,7 @@ Limits: URLs must be literals or template strings (a base path held in a variabl
 The `database` probe captures the schema on every `before` and `after` from two sources:
 
 - **Schema files** (no connection needed): Supabase migrations (`supabase/migrations/*.sql`, applied in order, and `supabase/schemas/`), other SQL migration folders (`migrations/`, `db/migrations/`, …; `down` migrations and seed files are skipped), `schema.prisma` (including multi-file schemas) and Drizzle table definitions (`pgTable`, `sqliteTable`, `mysqlTable`, `pgEnum`, indexes, references, `pgPolicy`). SQL is parsed with [libpg-query](https://github.com/constructive-io/libpg-query-node), the real Postgres parser, and only DDL is applied: functions, triggers, grants and data changes are ignored, as is everything in `DO` blocks except enum creation. A root `schema.sql` is only used when there are no migrations, because it is usually a copy of them. drizzle-kit and Prisma migration output is skipped when the Drizzle/Prisma schema itself is present.
-- **The live database** (Postgres/Supabase or SQLite), when a connection string is found in `.env.development.local`, `.env.local`, `.env.development` or `.env` (`DATABASE_URL`, `POSTGRES_URL`, `DIRECT_URL`, or the name in `probes.database.envVar`). `.env.production*` is never read.
+- **The live database** (Postgres/Supabase or SQLite), when a connection string is found in `.env.development.local`, `.env.local`, `.env.development` or `.env` (`DATABASE_URL`, `POSTGRES_URL`, `DIRECT_URL`, or the name in `probes.database.envVar`). `.env.production*` is never read. When there is no URL there but the project has `supabase/config.toml`, holdline uses the **local Supabase** database: `127.0.0.1` at the `[db] port` from that file (54322 by default), with the Supabase CLI's local credentials. Every safety rule below still applies.
 
 Both cover tables, columns, types, nullability, defaults, primary keys, foreign keys, indexes, unique constraints, enums, views, whether row-level security is on, and RLS policies. With a live connection, holdline compares both sources and reports where the database and the schema files disagree (for example a migration that was never applied).
 
@@ -193,8 +234,10 @@ npx playwright install chromium
     "startupTimeoutSec": 90,
     "pageTimeoutSec": 60,
     "networkIdleTimeoutSec": 5,
+    "params": { "locale": "en", "id": "1" },
     "threshold": 0.0002,
     "minPixels": 25,
+    "failOnUnexpectedChange": false,
     "allowNonLocalDatabase": false
   }
 }
@@ -212,7 +255,9 @@ Error messages are compared without the dev server's port, line and column numbe
 
 Each new problem is **confirmed** before it is reported: the page is reloaded in a fresh browser context up to 2 more times, and only problems that show up again are regressions. A problem that appears once and not on the reloads is reported as a **flaky** change, listing what appeared. In `before`, every page is loaded twice; a problem seen in only one of the two loads is recorded as flaky and never counts as new in `after`.
 
-**Visual differences** above a small threshold (more than 0.02% of pixels and at least 25 pixels) are **changes**, not regressions, because the task may have changed the UI on purpose. A difference must also show on every load: when the after screenshot differs, the page is reloaded up to 2 times, and if a reload matches the before screenshot the difference came from content that varies per load (a random tip, a rotating banner) and is only noted. Content that moved by a single pixel (sub-pixel layout jitter) is not counted. The report lists the before, after and diff images (`.holdline/visual/{before,after,diff}/`). A later phase will use the task description to decide which visual changes are unexpected.
+**Visual differences** above a small threshold (more than 0.02% of pixels and at least 25 pixels) are **changes**, not regressions, because the task may have changed the UI on purpose. A difference must also show on every load: when the after screenshot differs, the page is reloaded up to 2 times, and if a reload matches the before screenshot the difference came from content that varies per load (a random tip, a rotating banner) and is only noted. Content that moved by a single pixel (sub-pixel layout jitter) is not counted. The report lists the before, after and diff images (`.holdline/visual/{before,after,diff}/`), and the HTML report embeds them. A difference on a page outside the task's scope is an **unexpected visual change** (see "Task scope and the report"; `failOnUnexpectedChange: true` makes it a regression).
+
+**Pages under dynamic segments.** Pages can be templates: `"/[locale]/pricing"`, `"/users/[id]"`, `"/docs/[...slug]"` or `"/users/:id"`. Values come from `probes.visual.params`, e.g. `"params": { "locale": "en", "id": "1", "slug": "intro" }`. An optional catch-all (`[[...slug]]`) without a value is left out of the URL. A page whose value is missing is skipped with a warning naming the missing value. `holdline init` suggests pages under dynamic segments too. It guesses locale segments (`locale`, `lang`, …) from the `defaultLocale` in your Next.js or i18n config, or `en`. When you turn the check on, it asks for other values, and an empty answer skips those pages. With `--yes`, pages it can't fill are left out and listed.
 
 **Stable screenshots.** Animations, transitions and the text caret are disabled; the viewport, device scale, timezone (UTC), locale (en-US), colour scheme and reduced motion are fixed; holdline waits for the network to go quiet (at most `networkIdleTimeoutSec`, 5 s by default, since pages that poll never go quiet) and for fonts to load. Selectors in `mask` (and a page's own `mask`) are painted over. Dev-server overlays and indicators (the Next.js dev tools badge, Vite and webpack overlays) are hidden in screenshots; error overlays are still detected and reported. During `before`, two screenshots are taken a second apart; regions that differ (clocks, carousels, live counters), plus a margin of 32px, are recorded as **noisy** and ignored when comparing. The second `before` load adds regions that differ between loads (a random avatar, a per-request timestamp). Content that is the same for every load of one server run but different in the next (a "server started at" time, a build id) is not caught that way. Mask it. When more than half of a page is noisy or masked, the report says how much was left to compare.
 
@@ -222,7 +267,7 @@ Each new problem is **confirmed** before it is reported: the page is reloaded in
 
 `holdline visual [pages…] [--json]` runs the check now and prints what each page shows, without a snapshot or comparison. Pages on the command line replace the configured ones; screenshots go to `.holdline/visual/current/`. It works without `holdline init`.
 
-Speed: each page is loaded at both widths in parallel, twice in `before` (plus a one-second pause for the noise screenshot) and once in `after` (plus up to 2 reloads for a new problem). On a plain server that is about 1 s per page in `before`; a dev server that compiles pages on first request adds its compile time.
+Speed: each page is loaded at both widths in parallel, twice in `before` (plus a one-second pause for the noise screenshot) and once in `after` (plus up to 2 reloads for a new problem). On a plain server that is about 1 s per page in `before`; a dev server that compiles pages on first request adds its compile time. **On a typical app, the visual check adds roughly 30–70 seconds to `before`**, mostly dev-server startup and first-request compilation.
 
 ## Development
 

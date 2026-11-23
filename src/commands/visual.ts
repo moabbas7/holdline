@@ -1,7 +1,7 @@
 import { loadConfig, type Config } from '../core/config.js';
 import { HoldlineError } from '../core/errors.js';
 import type { Io } from '../io.js';
-import { normalisePagePath, type VisualCapture } from '../probes/visual/types.js';
+import { isPageTemplate, normalisePagePath, resolvePageTemplate, type VisualCapture } from '../probes/visual/types.js';
 import { describeVisualCapture, runVisual, visualSettingsFrom, writeVisualCapture } from '../probes/visual/index.js';
 import { openProject } from './common.js';
 
@@ -31,9 +31,15 @@ export async function visualCommand(cwd: string, opts: VisualOptions, io: Io): P
   if (opts.pages?.length) {
     settings.pages = [];
     for (const p of opts.pages) {
-      const norm = normalisePagePath(p);
+      let norm = normalisePagePath(p);
       if (!norm) throw new HoldlineError(`Not a page path on the app: ${p} (use paths like /about)`);
-      if (!settings.pages.some((x) => x.path === norm)) settings.pages.push({ path: norm, mask: [] });
+      if (isPageTemplate(norm)) {
+        const res = resolvePageTemplate(norm, settings.params);
+        if ('missing' in res) throw new HoldlineError(`${p} needs a value for ${res.missing.map((m) => `[${m}]`).join(', ')}: pass a concrete path or set probes.visual.params.`);
+        norm = res.path;
+      }
+      const page = norm;
+      if (!settings.pages.some((x) => x.path === page)) settings.pages.push({ path: page, mask: [] });
     }
   }
   if (settings.pages.length === 0) {

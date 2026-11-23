@@ -1,10 +1,10 @@
 import { readFile } from 'node:fs/promises';
-import type { Finding, Probe, ProbeReport } from '../types.js';
+import type { Finding, FindingMeta, Probe, ProbeReport } from '../types.js';
 import { captureSchema, dbCaptureFile, describeCapture, readCapture, settingsFrom, writeCapture } from './capture.js';
 import { changeKey, diffSchemas, schemaDrift, type SchemaChange } from './diff.js';
 import { captureLive } from './live/index.js';
 import { describeTarget } from './live/target.js';
-import { emptySchema, type DbCapture, type DbRef, type DbSchema } from './types.js';
+import { bareName, emptySchema, type DbCapture, type DbRef, type DbSchema } from './types.js';
 import { UsageIndex } from './usage.js';
 
 const MAX_LIST = 15;
@@ -141,13 +141,16 @@ export async function compareCaptures(b: DbCapture, a: DbCapture, opts: CompareO
   for (const { change: c, origins } of items) {
     const label = liveCompared && filesCompared ? ` [${[...origins].map((o) => (o === 'live' ? 'live database' : 'schema files')).join(' + ')}]` : '';
     const lines: string[] = [];
+    const meta: FindingMeta = c.table ? { tables: [bareName(c.table)] } : {};
     // An added column only matters to existing code when inserts that omit it will fail.
     const wantsUsage = usageKinds.has(c.kind) && (c.kind !== 'column-added' || c.severity === 'regression');
     if (usage && c.table && wantsUsage) {
       const u = usage.tableUsage(c.table);
       if (u) {
+        meta.affects = u.directFiles;
         if (c.kind === 'column-dropped' || c.kind === 'column-renamed') {
           const refs = await usage.columnRefs(u.directFiles, beforeSchema, c.table, c.column!);
+          meta.locations = refs.map((r) => ({ file: r.file, line: r.line, text: r.text }));
           for (const r of refs.slice(0, 10)) lines.push(`✗ ${r.file}:${r.line} still references ${c.column} (${r.text})`);
           if (refs.length > 10) lines.push(`…and ${refs.length - 10} more references`);
         }
@@ -159,7 +162,7 @@ export async function compareCaptures(b: DbCapture, a: DbCapture, opts: CompareO
       }
     }
     if (c.severity === 'regression') regressions++;
-    findings.push({ kind: c.severity, title: c.text + label, ...(lines.length ? { lines } : {}) });
+    findings.push({ kind: c.severity, title: c.text + label, ...(lines.length ? { lines } : {}), ...(Object.keys(meta).length ? { meta } : {}) });
   }
 
   // The live database changed: rollback won't undo that.
@@ -179,7 +182,10 @@ export async function compareCaptures(b: DbCapture, a: DbCapture, opts: CompareO
     const before = new Set(bl && b.files.schema ? schemaDrift(bl, b.files.schema).map((d) => d.key) : []);
     const fresh = driftAfter.filter((d) => !before.has(d.key));
     const old = driftAfter.filter((d) => before.has(d.key));
-    for (const d of fresh.slice(0, MAX_LIST)) findings.push({ kind: 'change', title: `Drift: ${d.text}` });
+    for (const d of fresh.slice(0, MAX_LIST)) {
+      const table = /^[^:]+:([^.]+\.[^.]+)/.exec(d.key)?.[1];
+      findings.push({ kind: 'change', title: `Drift: ${d.text}`, ...(table ? { meta: { tables: [bareName(table)] } } : {}) });
+    }
     if (fresh.length > MAX_LIST) findings.push({ kind: 'info', title: `…and ${fresh.length - MAX_LIST} more differences between the database and the schema files` });
     if (old.length) {
       notes.push({

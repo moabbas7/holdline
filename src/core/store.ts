@@ -15,6 +15,7 @@ export function storePaths(root: string) {
     lastReport: path.join(dir, 'last-report.json'),
     lock: path.join(dir, 'lock'),
     runs: path.join(dir, 'runs'),
+    reports: path.join(dir, 'reports'),
     displaced: path.join(dir, 'displaced'),
   };
 }

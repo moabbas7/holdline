@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
-import { Command, InvalidArgumentError } from 'commander';
+import { Command, CommanderError, InvalidArgumentError } from 'commander';
 import { afterCommand } from './commands/after.js';
 import { apiCommand } from './commands/api.js';
 import { beforeCommand } from './commands/before.js';
@@ -8,6 +8,7 @@ import { dbCommand } from './commands/db.js';
 import { graphCommand } from './commands/graph.js';
 import { initCommand } from './commands/init.js';
 import { pruneCommand } from './commands/prune.js';
+import { reportCommand } from './commands/report.js';
 import { rollbackCommand } from './commands/rollback.js';
 import { undoRollbackCommand } from './commands/undoRollback.js';
 import { unlockCommand } from './commands/unlock.js';
@@ -38,7 +39,8 @@ async function run(action: () => Promise<number | void>): Promise<void> {
       process.exitCode = 2;
     } else {
       process.stderr.write(`holdline: unexpected error: ${err.stack ?? err.message}\n`);
-      process.exitCode = 1;
+      // Not 1: that means "regressions found".
+      process.exitCode = 3;
     }
   }
 }
@@ -52,7 +54,9 @@ const parseCount = (v: string) => {
 const program = new Command()
   .name('holdline')
   .description('Catch what AI coding agents break outside the task they were given. Local only.')
-  .version(pkg.version);
+  .version(pkg.version)
+  // Usage errors exit 2, not commander's default 1 (which means "regressions found").
+  .exitOverride();
 
 program
   .command('init')
@@ -66,20 +70,31 @@ program
   .requiredOption('-t, --task <description>', 'what the agent is about to do')
   .option('-f, --force', 'replace an existing session without asking')
   .option('-y, --yes', 'non-interactive: replace an existing session, continue past warnings')
-  .action((o: { task: string; force?: boolean; yes?: boolean }) =>
+  .option('-s, --scope <glob>', 'files that are part of the task (repeatable), e.g. --scope "app/users/**"', (v: string, prev: string[]) => [...prev, v], [] as string[])
+  .action((o: { task: string; force?: boolean; yes?: boolean; scope: string[] }) =>
     run(async () => void (await beforeCommand(process.cwd(), o, createCliIo()))),
   );
 
 program
   .command('after')
-  .description('re-run checks; report what went from passing to failing and which files changed (exit 1 on regressions)')
-  .option('--json', 'print the report as JSON on stdout')
-  .action((o: { json?: boolean }) =>
+  .description('re-run checks and report what changed, grouped by the task\'s scope: outside the task first (exit 1 on regressions)')
+  .option('--json', 'print the report as JSON on stdout (schema: docs/report-schema.md)')
+  .option('-a, --all', 'also list the changes inside the task area (collapsed to a count by default) and notes')
+  .action((o: { json?: boolean; all?: boolean }) =>
     run(async () => {
       const report = await afterCommand(process.cwd(), o, createCliIo({ json: o.json }));
-      if (o.json) process.stdout.write(JSON.stringify(report, null, 2) + '\n');
-      return report.regressed ? 1 : 0;
+      if (o.json) process.stdout.write(JSON.stringify(report.scoped, null, 2) + '\n');
+      return report.scoped.exitCode;
     }),
+  );
+
+program
+  .command('report [which]')
+  .description('open the latest HTML report from `holdline after` (or report number [which] from --list)')
+  .option('-l, --list', 'list reports, newest first')
+  .option('--no-open', 'print the path without opening a browser')
+  .action((which: string | undefined, o: { list?: boolean; open: boolean }) =>
+    run(async () => void (await reportCommand(process.cwd(), { ...(which ? { which } : {}), list: o.list, noOpen: !o.open }, createCliIo()))),
   );
 
 program
@@ -155,4 +170,11 @@ program
   .option('-y, --yes', 'do not ask for confirmation')
   .action((o: { yes?: boolean }) => run(async () => void (await unlockCommand(process.cwd(), o, createCliIo()))));
 
-await program.parseAsync(process.argv);
+try {
+  await program.parseAsync(process.argv);
+} catch (e) {
+  if (e instanceof CommanderError) {
+    // Help and --version exit 0; commander has already printed any usage error.
+    process.exitCode = e.exitCode === 0 ? 0 : 2;
+  } else throw e;
+}

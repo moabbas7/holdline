@@ -9,7 +9,22 @@ import type { Io } from '../io.js';
 import { DevServerPool } from '../probes/devServer.js';
 import { enabledProbes } from '../probes/registry.js';
 import type { ProbeContext } from '../probes/types.js';
+import { changesSince, gitignoreSuggestion, topLevelNames } from '../core/ownOutputs.js';
+import { recallGraph } from '../probes/dependencies/graph.js';
+import { matchTask, snapshotFiles, type TaskScope } from '../scope/taskScope.js';
 import { locked, preflightLargeFiles, short } from './common.js';
+
+/** One line: what the task text and globs matched. */
+export function describeScope(scope: TaskScope): string {
+  const hits = scope.terms.filter((t) => !t.dropped && (t.files.length || t.routes.length || t.tables.length));
+  const parts = hits.slice(0, 6).map((t) => `"${t.text}" → ${t.files.length} file${t.files.length === 1 ? '' : 's'}`);
+  if (hits.length > 6) parts.push(`…${hits.length - 6} more`);
+  for (const g of scope.globs) parts.push(`--scope ${g}`);
+  const dropped = scope.terms.filter((t) => t.dropped).map((t) => `"${t.text}"`);
+  let line = parts.length ? parts.join(', ') : "nothing in the task text matched the project; the files the agent edits will be taken as the task area (add --scope '<glob>' to be explicit)";
+  if (dropped.length) line += ` (too common to use: ${dropped.slice(0, 4).join(', ')})`;
+  return line;
+}
 
 export interface BeforeOptions {
   task: string;
@@ -17,6 +32,8 @@ export interface BeforeOptions {
   force?: boolean;
   /** Non-interactive: replace an existing session and continue past warnings. */
   yes?: boolean;
+  /** Globs that are part of the task (repeatable --scope). */
+  scope?: string[];
 }
 
 export async function beforeCommand(cwd: string, opts: BeforeOptions, io: Io): Promise<Session> {
@@ -67,6 +84,24 @@ export async function beforeCommand(cwd: string, opts: BeforeOptions, io: Io): P
       await devServers.dispose();
     }
 
+    // Files written by the checks themselves (build output that isn't git-ignored).
+    const ownOutputs = await changesSince(repo, snap.sha);
+    const ownCount = Object.keys(ownOutputs).length;
+    if (ownCount > 0) {
+      const tops = await topLevelNames(repo, snap.sha);
+      io.warn(
+        `Your checks wrote ${ownCount} file${ownCount === 1 ? '' : 's'} that git doesn't ignore (build output?). ` +
+          `They won't be counted as the agent's changes unless the agent edits them. Consider adding to .gitignore: ${gitignoreSuggestion(Object.keys(ownOutputs), tops).join(' ')}`,
+      );
+    }
+
+    // The task's scope: what the task text and --scope globs name in the project.
+    const globs = (opts.scope ?? []).map((g) => g.trim()).filter(Boolean);
+    const scope = matchTask(task, globs, {
+      files: await snapshotFiles(repo, snap.sha),
+      graph: recallGraph(root, snap.sha),
+    });
+
     const session: Session = {
       version: 1,
       task,
@@ -83,6 +118,8 @@ export async function beforeCommand(cwd: string, opts: BeforeOptions, io: Io): P
       },
       runDir: path.relative(root, runDir),
       probes: results,
+      scope,
+      ...(ownCount > 0 ? { ownOutputs } : {}),
     };
     await writeSession(root, session);
 
@@ -93,6 +130,7 @@ export async function beforeCommand(cwd: string, opts: BeforeOptions, io: Io): P
 
     io.log();
     io.log(`Recorded task: ${io.c.bold(`"${task}"`)}`);
+    io.log(io.c.dim(`Task scope: ${describeScope(scope)}`));
     io.log(
       io.c.dim(
         'Covered: tracked, modified and untracked files. Not covered: git-ignored files (node_modules, ignored .env, build output).',

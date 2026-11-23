@@ -33,13 +33,28 @@ const MAX_AMBIGUOUS_MATCHES = 3;
 const PRISMA_RECEIVER =/prisma|^db$|^tx$|\.db$/i;
 const PROBE_EXTS = ['', '.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs', '.d.ts', '/index.ts', '/index.tsx', '/index.js', '/index.jsx'];
 
+/** Union of two name lists; an empty list means "anything" and wins. */
+function mergeNames(a: string[] | undefined, b: string[]): string[] {
+  if (a === undefined) return [...b];
+  if (a.length === 0 || b.length === 0) return [];
+  return [...new Set([...a, ...b])].sort();
+}
+
 class EdgeSet {
   private keys = new Set<string>();
   readonly list: Edge[] = [];
+  private byKey = new Map<string, Edge>();
   add(e: Edge): void {
     const k = `${e.from}\0${e.to}\0${e.type}`;
-    if (this.keys.has(k)) return;
+    const prev = this.byKey.get(k);
+    if (prev) {
+      // Several statements between the same two files: keep the union of names.
+      if (e.names) prev.names = mergeNames(prev.names, e.names);
+      if (e.reexports) prev.reexports = mergeNames(prev.reexports, e.reexports);
+      return;
+    }
     this.keys.add(k);
+    this.byKey.set(k, e);
     this.list.push(e);
   }
 }
@@ -74,7 +89,8 @@ export async function buildGraph(root: string, opts: BuildOptions = {}): Promise
 
   const files: DepGraph['files'] = {};
   for (const [p, hash] of [...loaded.hashes].sort(([a], [b]) => a.localeCompare(b))) {
-    files[p] = { hash, role: analysed.get(p) === 'source' ? 'module' : 'schema' };
+    const exported = facts.get(p)?.exports;
+    files[p] = { hash, role: analysed.get(p) === 'source' ? 'module' : 'schema', ...(exported?.length ? { exports: [...exported].sort() } : {}) };
   }
   const edges = new EdgeSet();
   const resolveIn = (file: string, spec: string): Resolution => resolver.resolve(file, spec);
@@ -87,7 +103,16 @@ export async function buildGraph(root: string, opts: BuildOptions = {}): Promise
       const r = resolveIn(file, imp.spec);
       if (r.kind === 'file') {
         if (r.path !== file) {
-          edges.add({ from: file, to: r.path, type: factsOf(r.path)?.useServer ? 'server-action' : 'import', line: imp.line });
+          const type = factsOf(r.path)?.useServer ? 'server-action' : 'import';
+          const names = imp.kind === 'import' ? [...imp.names] : imp.kind === 'reexport' ? undefined : [];
+          edges.add({
+            from: file,
+            to: r.path,
+            type,
+            line: imp.line,
+            ...(names ? { names } : {}),
+            ...(imp.kind === 'reexport' ? { reexports: imp.names.length ? [...imp.names] : ['*'] } : {}),
+          });
         }
       } else if (r.kind === 'missing') {
         missing.push({ file, imp, candidates: r.candidates });

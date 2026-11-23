@@ -122,6 +122,13 @@ export interface Edge {
   to: string;
   type: EdgeType;
   line?: number;
+  /**
+   * import / server-action edges: names `from` imports from `to` for its own use ('*' for a
+   * namespace import; empty for require, dynamic and side-effect imports, which may use anything).
+   */
+  names?: string[];
+  /** Names `from` re-exports from `to` ('*' for `export * from`). Set only on re-exports. */
+  reexports?: string[];
 }
 
 export interface BrokenImport {
@@ -166,7 +173,8 @@ export interface ApiCall {
 
 export interface DepGraph {
   version: 1;
-  files: Record<string, { hash: string; role: FileRole }>;
+  /** `exports`: the names a source file exports (absent in graphs from older versions). */
+  files: Record<string, { hash: string; role: FileRole; exports?: string[] }>;
   routes: Record<string, { files: string[]; methods: string[]; handlers?: RouteHandler[] }>;
   tables: Record<string, { definedIn: string[] }>;
   edges: Edge[];

@@ -1,0 +1,6 @@
+{
+  "name": "scope-app",
+  "private": true,
+  "scripts": { "build": "node scripts/check.mjs" },
+  "dependencies": { "next": "15.0.0", "react": "19.0.0" }
+}

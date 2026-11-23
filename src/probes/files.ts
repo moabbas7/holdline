@@ -27,7 +27,9 @@ export const filesProbe: Probe<FilesSnapshot> = {
   },
 
   async compare(before, after, ctx) {
-    const changes = await diffSnapshots(ctx.repo, before.sha, after.sha);
+    const own = ctx.ownOutputs;
+    // Files written only by holdline's own build in `before` are not the agent's changes.
+    const changes = (await diffSnapshots(ctx.repo, before.sha, after.sha)).filter((c) => !own?.excluded.has(c.path));
     return {
       probeId: 'files',
       title: this.title,
@@ -41,6 +43,10 @@ export const filesProbe: Probe<FilesSnapshot> = {
         title: c.oldPath ? `${c.status} ${c.oldPath} → ${c.path}` : `${c.status} ${c.path}`,
         detail: STATUS_WORDS[c.status] ?? c.status,
         path: c.path,
+        meta: {
+          files: c.oldPath ? [c.path, c.oldPath] : [c.path],
+          ...(own?.edited.has(c.path) ? { ownOutputEdited: true } : {}),
+        },
       })),
     };
   },

@@ -18,9 +18,41 @@ export interface ProbeContext {
    * ends). Optional: a probe without one starts and stops its own.
    */
   devServers?: DevServerPool;
+  /**
+   * after: files that holdline's own commands (the build in `before`) wrote after the
+   * "before" snapshot. `excluded`: content in the "after" snapshot still matches what the
+   * build wrote, so they are not agent changes. `edited`: the agent changed them since.
+   */
+  ownOutputs?: { excluded: Set<string>; edited: Set<string> };
 }
 
 export type FindingKind = 'regression' | 'fixed' | 'still-failing' | 'change' | 'info';
+
+/**
+ * Structured facts about what a finding is about, used to classify it against the task's
+ * scope and to build the HTML/JSON report. Purely descriptive: never changes detection.
+ */
+export interface FindingMeta {
+  /** Files the finding is about (repo-relative, forward slashes). */
+  files?: string[];
+  /** Page URLs (as loaded, e.g. "/en/pricing"). */
+  pages?: string[];
+  /** API route patterns ("/api/users/:id"). */
+  routes?: string[];
+  /** Database tables (bare lower-case names). */
+  tables?: string[];
+  /** Files that consume the subject (callers of a route, users of a table, dependents). */
+  affects?: string[];
+  /** Source locations (callers, lines reading a removed field, …). */
+  locations?: { file: string; line: number; text?: string }[];
+  /** Screenshots for a visual difference (repo-relative paths). */
+  images?: { before?: string; after?: string; diff?: string };
+  viewports?: string[];
+  /** A pixel difference (not an error) on a page. */
+  visualDiff?: boolean;
+  /** Set when the agent edited a file that holdline's own build had written in `before`. */
+  ownOutputEdited?: boolean;
+}
 
 export interface Finding {
   kind: FindingKind;
@@ -29,6 +61,7 @@ export interface Finding {
   path?: string;
   /** Extra lines printed indented under the finding (e.g. what depends on a changed file). */
   lines?: string[];
+  meta?: FindingMeta;
 }
 
 export interface ProbeReport {

@@ -2,9 +2,12 @@ import type { Finding, Probe, ProbeReport } from '../types.js';
 import { brokenKey, brokenTitle, describeDependents, summarizeDependents } from './format.js';
 import { buildGraph, dependentsOf, indexGraph, rememberGraph, type GraphIndex } from './graph.js';
 import { readGraph, writeGraph } from './store.js';
-import type { DepGraph, DepGraphRef } from './types.js';
+import type { BrokenImport, DepGraph, DepGraphRef } from './types.js';
 
 const MAX_BLAST_FINDINGS = 30;
+
+/** The importing file is the subject; the import's target (when resolved) is what it points at. */
+const brokenMeta = (br: BrokenImport) => ({ files: [br.file], locations: [{ file: br.file, line: br.line }] });
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
@@ -43,11 +46,11 @@ export const dependenciesProbe: Probe<DepGraphRef> = {
     if ('error' in b) return skipped(`graph from \`holdline before\` unavailable (${b.error}); run before again`);
     const a = await readGraph(ctx.root, afterRef);
     if ('error' in a) return skipped(`graph from \`holdline after\` unavailable (${a.error})`);
-    return compareGraphs(b.graph, a.graph, this.title);
+    return compareGraphs(b.graph, a.graph, this.title, ctx.ownOutputs?.excluded);
   },
 };
 
-export function compareGraphs(before: DepGraph, after: DepGraph, title = 'Dependencies'): ProbeReport {
+export function compareGraphs(before: DepGraph, after: DepGraph, title = 'Dependencies', notAgentChanges?: Set<string>): ProbeReport {
   const findings: Finding[] = [];
 
   // Broken imports: new ones are regressions.
@@ -56,15 +59,15 @@ export function compareGraphs(before: DepGraph, after: DepGraph, title = 'Depend
   let newBroken = 0;
   for (const br of after.broken) {
     if (beforeBroken.has(brokenKey(br))) {
-      findings.push({ kind: 'still-failing', title: `${brokenTitle(br)} (already broken before the task)`, path: br.file });
+      findings.push({ kind: 'still-failing', title: `${brokenTitle(br)} (already broken before the task)`, path: br.file, meta: brokenMeta(br) });
     } else {
       newBroken++;
-      findings.push({ kind: 'regression', title: `Broken import: ${brokenTitle(br)}`, path: br.file });
+      findings.push({ kind: 'regression', title: `Broken import: ${brokenTitle(br)}`, path: br.file, meta: brokenMeta(br) });
     }
   }
   for (const br of before.broken) {
     if (!afterBroken.has(brokenKey(br)) && after.files[br.file]) {
-      findings.push({ kind: 'fixed', title: `No longer broken: ${brokenTitle(br)}`, path: br.file });
+      findings.push({ kind: 'fixed', title: `No longer broken: ${brokenTitle(br)}`, path: br.file, meta: brokenMeta(br) });
     }
   }
 
@@ -76,6 +79,9 @@ export function compareGraphs(before: DepGraph, after: DepGraph, title = 'Depend
     else if (old.hash !== f.hash) changed.push({ path: p, status: 'modified' });
   }
   for (const p of Object.keys(before.files)) if (!after.files[p]) changed.push({ path: p, status: 'deleted' });
+  if (notAgentChanges?.size) {
+    for (let i = changed.length - 1; i >= 0; i--) if (notAgentChanges.has(changed[i]!.path)) changed.splice(i, 1);
+  }
   changed.sort((x, y) => x.path.localeCompare(y.path));
 
   const idxAfter = indexGraph(after);
@@ -93,6 +99,7 @@ export function compareGraphs(before: DepGraph, after: DepGraph, title = 'Depend
       title: `${c.path} (${c.status}) → ${summarizeDependents(graph, deps)} depend on it`,
       path: c.path,
       lines: describeDependents(graph, deps),
+      meta: { files: [c.path], affects: deps.filter((d) => graph.files[d.node]).map((d) => d.node) },
     });
   }
   findings.push(...blast.slice(0, MAX_BLAST_FINDINGS));

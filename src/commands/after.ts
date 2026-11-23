@@ -1,18 +1,32 @@
+import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { loadConfig } from '../core/config.js';
+import { loadConfig, type Config } from '../core/config.js';
 import { HoldlineError } from '../core/errors.js';
-import { headSha, objectExists } from '../core/git.js';
+import { headSha, objectExists, type RepoInfo } from '../core/git.js';
+import { gitignoreSuggestion, splitOwnOutputs, topLevelNames } from '../core/ownOutputs.js';
 import { readSession, type Session } from '../core/session.js';
-import { createSnapshot } from '../core/snapshot.js';
-import { stamp, writeJson } from '../core/store.js';
+import { createSnapshot, diffSnapshots } from '../core/snapshot.js';
+import { stamp, storePaths, writeJson } from '../core/store.js';
 import type { Io } from '../io.js';
+import { recallGraph } from '../probes/dependencies/graph.js';
+import { readGraph } from '../probes/dependencies/store.js';
+import type { DepGraph, DepGraphRef } from '../probes/dependencies/types.js';
 import { DevServerPool } from '../probes/devServer.js';
 import { enabledProbes } from '../probes/registry.js';
-import type { Finding, ProbeContext, ProbeReport } from '../probes/types.js';
-import { locked, preflightLargeFiles, relativeTime, short } from './common.js';
+import type { ProbeContext, ProbeReport } from '../probes/types.js';
+import { renderHtml } from '../report/html.js';
+import { buildReport, type ScopedReport } from '../report/model.js';
+import { printScopedReport } from '../report/terminal.js';
+import { classify } from '../scope/classify.js';
+import { matchTask, snapshotFiles } from '../scope/taskScope.js';
+import { locked, preflightLargeFiles, short } from './common.js';
 
 export interface AfterOptions {
   json?: boolean;
+  /** Expand the in-scope group (and notes) in the terminal report. */
+  all?: boolean;
+  /** Don't write the HTML report (tests). */
+  noHtml?: boolean;
 }
 
 export interface AfterReport {
@@ -22,7 +36,10 @@ export interface AfterReport {
   sessionCreatedAt: string;
   headMoved: { from: string | null; to: string | null } | null;
   regressed: boolean;
+  /** Each probe's own report, unclassified. */
   reports: ProbeReport[];
+  /** The classified report (also what --json prints). */
+  scoped: ScopedReport;
 }
 
 export async function afterCommand(cwd: string, opts: AfterOptions, io: Io): Promise<AfterReport> {
@@ -36,14 +53,17 @@ export async function afterCommand(cwd: string, opts: AfterOptions, io: Io): Pro
 
     await preflightLargeFiles(project, config.largeUntrackedWarnMB, io, { canCancel: false });
     const snap = await createSnapshot(repo, 'after');
+    const own = await splitOwnOutputs(repo, snap.sha, session.ownOutputs);
+    const ownOutputs = { excluded: new Set(own.excluded), edited: new Set(own.edited) };
 
-    const runDir = path.join(paths.runs, `${stamp()}-after`);
+    const runStamp = stamp();
+    const runDir = path.join(paths.runs, `${runStamp}-after`);
     const reports: ProbeReport[] = [];
     if (config.checks && Object.values(config.checks).some(Boolean)) io.log('Running checks:');
     const devServers = new DevServerPool();
     try {
       for (const probe of enabledProbes(config)) {
-        const ctx: ProbeContext = { repo, root, config, snapshotSha: snap.sha, phase: 'after', runDir, io, devServers };
+        const ctx: ProbeContext = { repo, root, config, snapshotSha: snap.sha, phase: 'after', runDir, io, devServers, ownOutputs };
         const afterData = await probe.snapshot(ctx);
         if (!(probe.id in session.probes)) {
           reports.push({
@@ -62,20 +82,97 @@ export async function afterCommand(cwd: string, opts: AfterOptions, io: Io): Pro
     }
 
     const head = await headSha(repo);
+    const headMoved = head !== session.snapshot.head ? { from: session.snapshot.head, to: head } : null;
+    const scoped = await scopeReport({ repo, root, config, session, afterSha: snap.sha, reports, headMoved, own });
+
+    if (!opts.noHtml) {
+      const file = await writeHtmlReport(root, runStamp, scoped);
+      scoped.htmlReport = path.relative(root, file).split(path.sep).join('/');
+    }
     const report: AfterReport = {
       task: session.task,
       beforeSnapshot: session.snapshot.sha,
       afterSnapshot: snap.sha,
       sessionCreatedAt: session.createdAt,
-      headMoved: head !== session.snapshot.head ? { from: session.snapshot.head, to: head } : null,
-      regressed: reports.some((r) => r.status === 'regressed'),
+      headMoved,
+      regressed: scoped.regressed,
       reports,
+      scoped,
     };
-    await writeJson(path.join(runDir, 'report.json'), report);
-    await writeJson(paths.lastReport, report);
-    printReport(report, io);
+    await writeJson(path.join(runDir, 'report.json'), scoped);
+    await writeJson(paths.lastReport, scoped);
+    if (scoped.htmlReport) await writeJson(path.join(paths.reports, `${runStamp}.json`), scoped);
+    printScopedReport(scoped, io, { all: opts.all });
     return report;
   });
+}
+
+interface ScopeReportInput {
+  repo: RepoInfo;
+  root: string;
+  config: Config;
+  session: Session;
+  afterSha: string;
+  reports: ProbeReport[];
+  headMoved: AfterReport['headMoved'];
+  own: { excluded: string[]; edited: string[] };
+}
+
+/** Classify every finding against the task's scope and build the report. */
+async function scopeReport(i: ScopeReportInput): Promise<ScopedReport> {
+  const { repo, root, session } = i;
+  const beforeFiles = await snapshotFiles(repo, session.snapshot.sha);
+  const afterFiles = await snapshotFiles(repo, i.afterSha);
+  const depsRef = session.probes.dependencies as DepGraphRef | undefined;
+  let beforeGraph: DepGraph | null = null;
+  if (depsRef) {
+    const g = await readGraph(root, depsRef);
+    if ('graph' in g) beforeGraph = g.graph;
+  }
+  const afterGraph = recallGraph(root, i.afterSha);
+  // Sessions from older versions have no scope: compute it now from the "before" state.
+  const scope = session.scope ?? matchTask(session.task, [], { files: beforeFiles, graph: beforeGraph });
+  const excluded = new Set(i.own.excluded);
+  const edited = (await diffSnapshots(repo, session.snapshot.sha, i.afterSha)).filter((c) => !excluded.has(c.path));
+  const visual = i.config.probes?.visual as { failOnUnexpectedChange?: unknown } | undefined;
+  const classification = classify({
+    scope,
+    beforeFiles,
+    afterFiles,
+    beforeGraph,
+    afterGraph,
+    edited: edited.map((c) => ({ path: c.path, status: c.status, ...(c.oldPath ? { oldPath: c.oldPath } : {}) })),
+    ownEdited: new Set(i.own.edited),
+    reports: i.reports,
+    failOnUnexpectedVisual: visual?.failOnUnexpectedChange === true,
+    root,
+  });
+  const tops = i.own.excluded.length ? await topLevelNames(repo, session.snapshot.sha) : new Set<string>();
+  return buildReport({
+    task: session.task,
+    sessionCreatedAt: session.createdAt,
+    beforeSha: session.snapshot.sha,
+    afterSha: i.afterSha,
+    headMoved: i.headMoved,
+    globs: scope.globs,
+    classification,
+    reports: i.reports,
+    ownOutputs: {
+      excluded: i.own.excluded,
+      agentEdited: i.own.edited,
+      gitignoreSuggestion: i.own.excluded.length ? gitignoreSuggestion(i.own.excluded, tops) : [],
+    },
+  });
+}
+
+/** Write .holdline/reports/<stamp>.html. */
+export async function writeHtmlReport(root: string, runStamp: string, scoped: ScopedReport): Promise<string> {
+  const dir = storePaths(root).reports;
+  await mkdir(dir, { recursive: true });
+  const file = path.join(dir, `${runStamp}.html`);
+  scoped.htmlReport = path.relative(root, file).split(path.sep).join('/');
+  await writeFile(file, await renderHtml(scoped, root));
+  return file;
 }
 
 export async function requireSession(root: string): Promise<Session> {
@@ -86,48 +183,3 @@ export async function requireSession(root: string): Promise<Session> {
   return session;
 }
 
-const MARK: Record<Finding['kind'], string> = {
-  regression: '✗',
-  fixed: '✓',
-  'still-failing': '•',
-  change: '',
-  info: 'i',
-};
-
-function indent(text: string, maxLines: number): string {
-  const lines = text.split('\n');
-  const shown = lines.length > maxLines ? ['…', ...lines.slice(-maxLines)] : lines;
-  return shown.map((l) => `      ${l}`).join('\n');
-}
-
-export function printReport(r: AfterReport, io: Io): void {
-  io.log();
-  io.log(`${io.c.bold('Task:')} "${r.task}"  ${io.c.dim(`(snapshot ${short(r.beforeSnapshot)}, ${relativeTime(r.sessionCreatedAt)})`)}`);
-  if (r.headMoved) {
-    io.log(
-      io.c.yellow(
-        `HEAD moved during the task: ${short(r.headMoved.from)} → ${short(r.headMoved.to)} (the agent may have committed or switched branches).`,
-      ),
-    );
-  }
-  for (const rep of r.reports) {
-    io.log();
-    const head =
-      rep.status === 'regressed' ? io.c.red(rep.summary) : rep.status === 'skipped' ? io.c.dim(rep.summary) : rep.summary;
-    io.log(`${io.c.bold(rep.title)}: ${head}`);
-    for (const f of rep.findings) {
-      const paint =
-        f.kind === 'regression' ? io.c.red : f.kind === 'fixed' ? io.c.green : f.kind === 'change' ? (s: string) => s : io.c.dim;
-      io.log(`  ${paint(f.kind === 'change' ? f.title : `${MARK[f.kind]} ${f.title}`)}`);
-      if (f.kind === 'regression' && f.detail) io.log(io.c.dim(indent(f.detail, 15)));
-      for (const line of f.lines ?? []) io.log(io.c.dim(`      ${line}`));
-    }
-  }
-  io.log();
-  if (r.regressed) {
-    const n = r.reports.flatMap((x) => x.findings).filter((f) => f.kind === 'regression').length;
-    io.log(io.c.red(io.c.bold(`${n} regression${n > 1 ? "s" : ""} since the snapshot.`)) + ` Undo all changes with ${io.c.bold('holdline rollback')}.`);
-  } else {
-    io.log(io.c.green('Nothing went from passing to failing.'));
-  }
-}

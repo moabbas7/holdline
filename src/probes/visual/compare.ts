@@ -26,6 +26,7 @@ interface Raw {
   viewport: string;
   text: string;
   lines?: string[];
+  images?: { before: string; after: string; diff: string };
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -149,6 +150,7 @@ export async function compareVisual(before: VisualCapture, after: VisualCapture,
           viewport: a.viewport,
           text: `looks different (${pct < 0.1 ? pct.toFixed(2) : pct.toFixed(1)}% of pixels changed${size})`,
           lines: [`before: ${b.screenshot.file}`, `after:  ${a.screenshot.file}`, `diff:   ${rel(diffFile)}`],
+          images: { before: b.screenshot.file, after: a.screenshot.file, diff: rel(diffFile) },
         });
       }
     }
@@ -169,6 +171,7 @@ export async function compareVisual(before: VisualCapture, after: VisualCapture,
       kind: raw.kind,
       title: `${raw.page} (${viewports.join(', ')}): ${raw.text}`,
       ...(raw.lines ? { lines: raw.lines } : {}),
+      meta: { pages: [raw.page], viewports, ...(raw.images ? { images: raw.images, visualDiff: true } : {}) },
     }));
 
   const regressions = findings.filter((f) => f.kind === 'regression').length;

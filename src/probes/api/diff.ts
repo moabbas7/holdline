@@ -7,7 +7,7 @@ import { categoryOf } from '../dependencies/format.js';
 import { dependentsOf, indexGraph, type GraphIndex } from '../dependencies/graph.js';
 import { matchRoute } from '../dependencies/routes.js';
 import type { ApiCall, DepGraph } from '../dependencies/types.js';
-import type { Finding, ProbeReport } from '../types.js';
+import type { Finding, FindingMeta, ProbeReport } from '../types.js';
 import { fieldRefs } from './fieldRefs.js';
 import { diffShapes, pathText, shapeText, type ShapeChange } from './shape.js';
 import type { ApiCapture, LiveRequestResult, MethodApi, RouteApi, Shape, Status } from './types.js';
@@ -34,6 +34,8 @@ interface Pending {
   calls?: ApiCall[];
   field?: string[];
   maybeCalls?: ApiCall[];
+  /** Route patterns the item is about (for scope classification). */
+  routes?: string[];
 }
 
 export async function compareApi(b: ApiCapture, a: ApiCapture, ctx: CompareContext): Promise<ProbeReport> {
@@ -48,7 +50,12 @@ export async function compareApi(b: ApiCapture, a: ApiCapture, ctx: CompareConte
   /** Calls that reach `route` in the after state with a method that `want` accepts. */
   const callsTo = (pattern: string, want: (m: string | undefined) => boolean) => calls.filter((c) => c.routes.includes(pattern) && want(c.method));
 
+  /** Tag every item pushed since `from` with the route it is about. */
+  const tag = (from: number, routes: string[]) => {
+    for (let i = from; i < items.length; i++) items[i]!.routes ??= routes;
+  };
   for (const [key, rb] of bByKey) {
+    const start = items.length;
     const ra = aByKey.get(key);
     if (!ra) {
       // Removed: calls that no longer match any route but would have matched this one.
@@ -59,27 +66,45 @@ export async function compareApi(b: ApiCapture, a: ApiCapture, ctx: CompareConte
       } else {
         items.push({ kind: 'change', title: `Route removed: ${methods ? methods + ' ' : ''}${rb.pattern} (nothing in the project calls it)`, lines: [] });
       }
+      tag(start, [rb.pattern]);
       continue;
     }
     compareRoute(rb, ra, items, callsTo);
+    tag(start, [ra.pattern]);
   }
   for (const [key, ra] of aByKey) {
     if (bByKey.has(key)) continue;
     const methods = Object.keys(ra.methods).map(methodLabel).join('|');
-    items.push({ kind: 'change', title: `New route: ${methods ? methods + ' ' : ''}${ra.pattern}${ra.unknown ? ` (not analysable: ${ra.unknown})` : ''}`, lines: [] });
+    items.push({ kind: 'change', title: `New route: ${methods ? methods + ' ' : ''}${ra.pattern}${ra.unknown ? ` (not analysable: ${ra.unknown})` : ''}`, lines: [], routes: [ra.pattern] });
   }
 
+  const liveStart = items.length;
   compareLive(b, a, items, graph);
+  // Live results name a concrete path: match it to the known route patterns.
+  const patterns = [...new Set([...Object.values(a.routes), ...Object.values(b.routes)].map((r) => r.pattern))];
+  for (let i = liveStart; i < items.length; i++) {
+    const p = /^\[live\] \S+ ([^?:\s]+)/.exec(items[i]!.title)?.[1];
+    if (p) {
+      const best = patterns.map((pat) => [pat, matchRoute(p, pat)] as const).filter(([, sc]) => sc >= 0).sort((x, y) => y[1] - x[1])[0];
+      items[i]!.routes ??= best ? [best[0]] : [];
+    }
+  }
 
   // Caller details for regressions.
   const idx = graph ? indexGraph(graph) : null;
   const findings: Finding[] = [];
   for (const it of items) {
     const lines = [...it.lines];
+    const meta: FindingMeta = { routes: it.routes ?? [] };
+    if (it.calls?.length) {
+      meta.affects = [...new Set(it.calls.map((c) => c.file))];
+      meta.locations = it.calls.map((c) => ({ file: c.file, line: c.line, text: `calls ${c.method ? c.method + ' ' : ''}${c.url}` }));
+    }
     if (it.calls?.length && graph && idx) {
       lines.push(...callerLines(graph, idx, it.calls));
       if (it.field && it.field.length) {
         const refs = await fieldRefs(ctx.root, it.calls, it.field, { limit: MAX_FIELD_LINES + 1 });
+        for (const r of refs) if (r.exact) meta.locations!.push({ file: r.file, line: r.line, text: `reads ${pathText(it.field)}` });
         for (const r of refs.slice(0, MAX_FIELD_LINES)) {
           lines.push(r.exact ? `✗ ${r.file}:${r.line} reads ${pathText(it.field)} (${r.text})` : `? ${r.file}:${r.line} may read ${it.field.at(-1)} (${r.text})`);
         }
@@ -89,7 +114,7 @@ export async function compareApi(b: ApiCapture, a: ApiCapture, ctx: CompareConte
     if (it.maybeCalls?.length) {
       for (const c of it.maybeCalls.slice(0, 4)) lines.push(`? ${c.file}:${c.line} calls ${c.url} with a method holdline can't determine`);
     }
-    findings.push({ kind: it.kind, title: it.title, ...(lines.length ? { lines } : {}) });
+    findings.push({ kind: it.kind, title: it.title, ...(lines.length ? { lines } : {}), meta });
   }
   findings.sort((x, y) => rank(x.kind) - rank(y.kind));
   for (const w of a.warnings.slice(0, 5)) findings.push({ kind: 'info', title: w });

@@ -1,0 +1,4 @@
+{
+  "compilerOptions": { "jsx": "preserve", "baseUrl": ".", "paths": { "@/*": ["./*"] }, "strict": true },
+  "include": ["**/*.ts", "**/*.tsx"]
+}

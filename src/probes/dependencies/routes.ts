@@ -101,3 +101,25 @@ export function matchRoute(call: string, route: string): number {
   }
   return cs.length === rs.length ? score : -1;
 }
+
+/**
+ * Like nextPagePattern, but keeps Next.js segment syntax: `/[locale]/blog/[...slug]`.
+ * Used to suggest pages with dynamic segments (filled from probes.visual.params).
+ */
+export function nextPageTemplate(rel: string): string | null {
+  if (nextPagePattern(rel) === null) return null;
+  const ext = P.extname(rel);
+  const noExt = rel.slice(0, -ext.length);
+  const app = /(?:^|\/)(?:src\/)?app\/(.*)$/.exec(noExt);
+  let segs: string[];
+  if (app && /(?:^|\/)page$/.test(noExt)) {
+    segs = app[1]!.split('/');
+    segs.pop();
+  } else {
+    const pages = /(?:^|\/)(?:src\/)?pages\/(.*)$/.exec(noExt);
+    if (!pages) return null;
+    segs = pages[1]!.split('/');
+  }
+  const out = segs.filter((s) => s !== '' && s !== 'index' && !/^\(.*\)$/.test(s) && !s.startsWith('@'));
+  return '/' + out.join('/');
+}

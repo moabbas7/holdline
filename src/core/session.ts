@@ -1,3 +1,4 @@
+import type { TaskScope } from '../scope/taskScope.js';
 import { readJson, storePaths, writeJson } from './store.js';
 
 export interface Session {
@@ -17,6 +18,13 @@ export interface Session {
   runDir: string;
   /** Each probe's snapshot() result, keyed by probe id. */
   probes: Record<string, unknown>;
+  /** What the task text and --scope globs name (absent in sessions from older versions). */
+  scope?: TaskScope;
+  /**
+   * Files that holdline's own commands (the checks) created, changed or deleted after the
+   * snapshot, with their blob afterwards (null: deleted). Absent when there were none.
+   */
+  ownOutputs?: Record<string, string | null>;
 }
 
 export interface RollbackRecord {

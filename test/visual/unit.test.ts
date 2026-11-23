@@ -133,7 +133,7 @@ describe('compare', () => {
   it('merges viewports and names failed requests', async () => {
     const fr = [{ method: 'POST', path: '/api/save', failure: 'ERR_CONNECTION_REFUSED' }];
     const r = await compareVisual(cap([res('/', 'desktop'), res('/', 'mobile')]), cap([res('/', 'desktop', { failedRequests: fr }), res('/', 'mobile', { failedRequests: fr })]), opts());
-    expect(r.findings).toEqual([{ kind: 'regression', title: '/ (desktop, mobile): new failed request: POST /api/save → ERR_CONNECTION_REFUSED' }]);
+    expect(r.findings).toEqual([{ kind: 'regression', title: '/ (desktop, mobile): new failed request: POST /api/save → ERR_CONNECTION_REFUSED', meta: { pages: ['/'], viewports: ['desktop', 'mobile'] } }]);
     expect(r.status).toBe('regressed');
   });
 });
